@@ -8,33 +8,32 @@ export function AirflowPanel({
   airflow: AirflowVector[];
   rooms: Room[];
 }) {
+  const strongest = [...airflow].sort((a, b) => b.strength - a.strength)[0];
+  const strongestRoom = rooms.find((room) => room.id === strongest?.roomId);
+
   return (
-    <div className="subpanel stack gap-md">
-      <div className="subpanel-header">
-        <h2>房间气流图</h2>
-        <span className="badge">功能 2</span>
+    <section className="dock-panel">
+      <div className="dock-title">
+        <strong>气流图层</strong>
+        <span>箭头已进入 3D 房间</span>
       </div>
-      <div className="stack gap-sm">
+      {strongest ? (
+        <div className="dock-metrics">
+          <span>{strongestRoom?.name ?? strongest.roomId}</span>
+          <span>{formatDirectionLabel(strongest.fromDirection)} → {formatDirectionLabel(strongest.toDirection)}</span>
+          <span>{Math.round(strongest.strength * 100)}%</span>
+        </div>
+      ) : null}
+      <div className="flow-strip">
         {airflow.map((flow) => {
           const room = rooms.find((item) => item.id === flow.roomId);
           return (
-            <div key={flow.id} className="flow-card">
-              <div className="subpanel-header">
-                <strong>{room?.name ?? flow.roomId}</strong>
-                <span className="badge">{Math.round(flow.strength * 100)}%</span>
-              </div>
-              <div className="flow-arrow">
-                <span>{formatDirectionLabel(flow.fromDirection)}</span>
-                <div className="flow-bar">
-                  <div className="flow-bar-fill" style={{ width: `${Math.round(flow.strength * 100)}%` }} />
-                </div>
-                <span>{formatDirectionLabel(flow.toDirection)}</span>
-              </div>
-              <p className="muted">{flow.explanation}</p>
-            </div>
+            <span key={flow.id}>
+              {room?.name ?? flow.roomId} {Math.round(flow.strength * 100)}%
+            </span>
           );
         })}
       </div>
-    </div>
+    </section>
   );
 }

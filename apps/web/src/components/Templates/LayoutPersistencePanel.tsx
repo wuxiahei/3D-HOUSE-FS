@@ -24,7 +24,6 @@ function readLayoutJson(raw: string): { layout?: HouseLayout; error?: string } {
     if (blockingIssues.length > 0) {
       return { error: blockingIssues.map((issue) => issue.message).join(" ") };
     }
-
     return { layout };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "JSON 解析失败，请检查格式。" };
@@ -41,7 +40,6 @@ export function LayoutPersistencePanel({ layout, onRestoreLayout }: LayoutPersis
   const [importText, setImportText] = useState("");
   const [status, setStatus] = useState("尚未保存当前布局");
   const [savedAt, setSavedAt] = useState<string | null>(null);
-
   const exportText = useMemo(() => stringifyLayout(layout), [layout]);
 
   useEffect(() => {
@@ -66,13 +64,11 @@ export function LayoutPersistencePanel({ layout, onRestoreLayout }: LayoutPersis
       setStatus("浏览器里还没有保存过布局");
       return;
     }
-
     const result = readLayoutJson(stored);
     if (!result.layout) {
       setStatus(result.error ?? "恢复失败");
       return;
     }
-
     onRestoreLayout(result.layout);
     setStatus("已从浏览器恢复布局");
   }
@@ -83,14 +79,9 @@ export function LayoutPersistencePanel({ layout, onRestoreLayout }: LayoutPersis
       setStatus(result.error ?? "导入失败");
       return;
     }
-
     onRestoreLayout(result.layout);
     setImportText("");
     setStatus("已导入 JSON 布局");
-  }
-
-  function importFromText() {
-    importLayout(importText);
   }
 
   function importFromFile(event: ChangeEvent<HTMLInputElement>) {
@@ -99,7 +90,6 @@ export function LayoutPersistencePanel({ layout, onRestoreLayout }: LayoutPersis
     if (!file) {
       return;
     }
-
     const reader = new FileReader();
     reader.onload = () => importLayout(String(reader.result ?? ""));
     reader.onerror = () => setStatus("读取文件失败，请重新选择 JSON 文件。");
@@ -118,45 +108,33 @@ export function LayoutPersistencePanel({ layout, onRestoreLayout }: LayoutPersis
   }
 
   return (
-    <div className="subpanel stack gap-lg">
-      <div className="subpanel-header">
-        <h2>布局文件</h2>
-        <span className="badge">{savedAt ? "可恢复" : "未保存"}</span>
+    <section className="inspector-section">
+      <div className="section-title compact">
+        <h2>文件</h2>
+        <span>{savedAt ? "可恢复" : "未保存"}</span>
       </div>
-
       <div className="tool-row">
-        <button type="button" className="tool-button" onClick={saveToBrowser}>
-          保存
-        </button>
-        <button type="button" className="tool-button" onClick={restoreFromBrowser}>
-          恢复
-        </button>
-        <button type="button" className="tool-button" onClick={exportJson}>
-          导出 JSON
-        </button>
-        <label className="tool-button file-button">
-          导入文件
+        <button type="button" onClick={saveToBrowser}>保存</button>
+        <button type="button" onClick={restoreFromBrowser}>恢复</button>
+        <button type="button" onClick={exportJson}>导出</button>
+        <label className="file-button">
+          导入
           <input type="file" accept="application/json,.json" onChange={importFromFile} />
         </label>
       </div>
-
       <label className="field">
-        <span>粘贴 JSON 导入</span>
+        <span>粘贴 JSON</span>
         <textarea
           value={importText}
-          rows={5}
-          placeholder="把导出的 HouseLayout JSON 粘贴到这里"
+          rows={4}
+          placeholder="把 HouseLayout JSON 粘贴到这里"
           onChange={(event) => setImportText(event.target.value)}
         />
       </label>
-
-      <div className="mini-action-row">
-        <button type="button" className="ghost-button" disabled={!importText.trim()} onClick={importFromText}>
-          导入布局
-        </button>
-      </div>
-
+      <button type="button" disabled={!importText.trim()} onClick={() => importLayout(importText)}>
+        导入文本
+      </button>
       <p className="status-line">{status}</p>
-    </div>
+    </section>
   );
 }

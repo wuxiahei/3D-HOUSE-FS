@@ -1,9 +1,5 @@
 import type { HeatmapCell, SensorPoint } from "@fengshui/core";
 
-function cellColor(intensity: number) {
-  return `linear-gradient(135deg, hsl(${205 - intensity * 160} 80% 66%), hsl(${35 + intensity * 25} 88% 62%))`;
-}
-
 export function HeatmapPanel({
   heatmap,
   sensors
@@ -11,41 +7,28 @@ export function HeatmapPanel({
   heatmap: HeatmapCell[];
   sensors: SensorPoint[];
 }) {
-  const topCells = [...heatmap].sort((a, b) => b.temperature - a.temperature).slice(0, 3);
+  const hottest = [...heatmap].sort((a, b) => b.temperature - a.temperature)[0];
+  const coolest = [...heatmap].sort((a, b) => a.temperature - b.temperature)[0];
 
   return (
-    <div className="subpanel stack gap-md">
-      <div className="subpanel-header">
-        <h2>热力图</h2>
-        <span className="badge">功能 1</span>
+    <section className="dock-panel">
+      <div className="dock-title">
+        <strong>热力图层</strong>
+        <span>已贴合 3D 地面</span>
       </div>
-      <div className="mini-heatmap">
-        {heatmap.slice(0, 18).map((cell) => (
-          <div key={cell.id} className="mini-heat-cell" style={{ background: cellColor(cell.intensity) }}>
-            <span>{cell.temperature.toFixed(1)}°</span>
-          </div>
+      <div className="dock-metrics">
+        <span>最高 {hottest?.temperature.toFixed(1)}°C</span>
+        <span>最低 {coolest?.temperature.toFixed(1)}°C</span>
+        <span>{sensors.length} 个温度点</span>
+      </div>
+      <div className="heat-strip">
+        {heatmap.slice(0, 12).map((cell) => (
+          <span
+            key={cell.id}
+            style={{ background: `hsl(${205 - cell.intensity * 175} 82% 58%)` }}
+          />
         ))}
       </div>
-      <div className="info-card">
-        <strong>热点区域参考</strong>
-        <ul className="plain-list">
-          {topCells.map((cell) => (
-            <li key={cell.id}>
-              {cell.temperature.toFixed(1)}°C，位置约 ({cell.x.toFixed(1)}, {cell.y.toFixed(1)})
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="info-card accent-soft">
-        <strong>温度输入点</strong>
-        <ul className="plain-list">
-          {sensors.map((sensor) => (
-            <li key={sensor.id}>
-              {sensor.label}：{sensor.temperature.toFixed(1)}°C
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
+    </section>
   );
 }

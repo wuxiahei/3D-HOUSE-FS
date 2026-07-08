@@ -14,10 +14,16 @@ import { AirflowPanel } from "./Analysis/AirflowPanel";
 import { FengshuiPanel } from "./Analysis/FengshuiPanel";
 import { HeatmapPanel } from "./Analysis/HeatmapPanel";
 import { LayoutEditor } from "./Editor/LayoutEditor";
-import { QuickStartWizard } from "./EditorWizard/QuickStartWizard";
 import { SceneViewport } from "./Scene/SceneViewport";
 import { LayoutPersistencePanel } from "./Templates/LayoutPersistencePanel";
 import { TemplatePicker } from "./Templates/TemplatePicker";
+
+export interface SceneLayers {
+  heat: boolean;
+  airflow: boolean;
+  fengshui: boolean;
+  walls: boolean;
+}
 
 interface DraftWall {
   start: LayoutPoint;
@@ -34,6 +40,12 @@ export function AppShell() {
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("select");
   const [draftWall, setDraftWall] = useState<DraftWall | null>(null);
+  const [layers, setLayers] = useState<SceneLayers>({
+    heat: true,
+    airflow: true,
+    fengshui: true,
+    walls: true
+  });
 
   const validation = useMemo(() => validateLayout(layout), [layout]);
   const heatmap = useMemo(() => generateHeatmap(layout), [layout]);
@@ -41,7 +53,7 @@ export function AppShell() {
   const fengshui = useMemo(() => analyzeFengshui(layout), [layout]);
 
   const selectedRoom = layout.rooms.find((room) => room.id === selectedRoomId) ?? null;
-  const selectedRoomPalace = selectedRoom
+  const activePalace = selectedRoom
     ? fengshui.roomPalaceMap.find((item) => item.roomId === selectedRoom.id)?.palace ?? null
     : null;
 
@@ -51,6 +63,16 @@ export function AppShell() {
     setSelectedRoomId(nextLayout.rooms[0]?.id ?? null);
     setSelectedWallId(null);
     setDraftWall(null);
+    setEditorMode("select");
+  }
+
+  function restoreLayout(nextLayout: HouseLayout) {
+    const syncedLayout = syncDerivedLayoutData(nextLayout);
+    setLayout(syncedLayout);
+    setSelectedRoomId(syncedLayout.rooms[0]?.id ?? null);
+    setSelectedWallId(null);
+    setDraftWall(null);
+    setEditorMode("select");
   }
 
   function updateMetadata(key: keyof HouseLayout["metadata"], value: string | number) {
@@ -70,56 +92,6 @@ export function AppShell() {
         ...current.weather,
         [key]: value
       }
-    }));
-  }
-
-  function addSensorPoint() {
-    setLayout((current) => {
-      const nextNumber = current.sensors.length + 1;
-      const sensor: SensorPoint = {
-        id: `sensor-${Date.now()}`,
-        label: `温度点 ${nextNumber}`,
-        x: Number((current.bounds.width / 2).toFixed(2)),
-        y: Number((current.bounds.depth / 2).toFixed(2)),
-        temperature: Number((current.weather.outdoorTemperature - 4).toFixed(1))
-      };
-      return {
-        ...current,
-        sensors: [...current.sensors, sensor]
-      };
-    });
-  }
-
-  function updateSensorPoint(sensorId: string, patch: Partial<SensorPoint>) {
-    setLayout((current) => ({
-      ...current,
-      sensors: current.sensors.map((sensor) =>
-        sensor.id === sensorId
-          ? {
-              ...sensor,
-              ...patch,
-              x:
-                patch.x === undefined
-                  ? sensor.x
-                  : Number(Math.min(current.bounds.width, Math.max(0, patch.x)).toFixed(2)),
-              y:
-                patch.y === undefined
-                  ? sensor.y
-                  : Number(Math.min(current.bounds.depth, Math.max(0, patch.y)).toFixed(2)),
-              temperature:
-                patch.temperature === undefined
-                  ? sensor.temperature
-                  : Number(patch.temperature.toFixed(1))
-            }
-          : sensor
-      )
-    }));
-  }
-
-  function deleteSensorPoint(sensorId: string) {
-    setLayout((current) => ({
-      ...current,
-      sensors: current.sensors.filter((sensor) => sensor.id !== sensorId)
     }));
   }
 
@@ -188,17 +160,58 @@ export function AppShell() {
     });
   }
 
-  function replaceLayout(nextLayout: HouseLayout) {
-    setLayout(nextLayout);
+  function addSensorPoint() {
+    setLayout((current) => {
+      const nextNumber = current.sensors.length + 1;
+      const sensor: SensorPoint = {
+        id: `sensor-${Date.now()}`,
+        label: `温度点 ${nextNumber}`,
+        x: Number((current.bounds.width / 2).toFixed(2)),
+        y: Number((current.bounds.depth / 2).toFixed(2)),
+        temperature: Number((current.weather.outdoorTemperature - 4).toFixed(1))
+      };
+      return {
+        ...current,
+        sensors: [...current.sensors, sensor]
+      };
+    });
   }
 
-  function restoreLayout(nextLayout: HouseLayout) {
-    const syncedLayout = syncDerivedLayoutData(nextLayout);
-    setLayout(syncedLayout);
-    setSelectedRoomId(syncedLayout.rooms[0]?.id ?? null);
-    setSelectedWallId(null);
-    setDraftWall(null);
-    setEditorMode("select");
+  function updateSensorPoint(sensorId: string, patch: Partial<SensorPoint>) {
+    setLayout((current) => ({
+      ...current,
+      sensors: current.sensors.map((sensor) =>
+        sensor.id === sensorId
+          ? {
+              ...sensor,
+              ...patch,
+              x:
+                patch.x === undefined
+                  ? sensor.x
+                  : Number(Math.min(current.bounds.width, Math.max(0, patch.x)).toFixed(2)),
+              y:
+                patch.y === undefined
+                  ? sensor.y
+                  : Number(Math.min(current.bounds.depth, Math.max(0, patch.y)).toFixed(2)),
+              temperature:
+                patch.temperature === undefined
+                  ? sensor.temperature
+                  : Number(patch.temperature.toFixed(1))
+            }
+          : sensor
+      )
+    }));
+  }
+
+  function deleteSensorPoint(sensorId: string) {
+    setLayout((current) => ({
+      ...current,
+      sensors: current.sensors.filter((sensor) => sensor.id !== sensorId)
+    }));
+  }
+
+  function replaceLayout(nextLayout: HouseLayout) {
+    setLayout(nextLayout);
   }
 
   function deleteSelectedWall() {
@@ -219,42 +232,99 @@ export function AppShell() {
     setSelectedWallId(null);
   }
 
-  function selectWall(wallId: string | null) {
-    setSelectedWallId(wallId);
+  function toggleLayer(key: keyof SceneLayers) {
+    setLayers((current) => ({
+      ...current,
+      [key]: !current[key]
+    }));
   }
 
   return (
-    <main className="app-shell">
-      <section className="hero">
-        <div>
-          <p className="eyebrow">3D HOUSE FS</p>
-          <h1>小白也能上手的 3D 户型分析工作台</h1>
-          <p className="hero-copy">
-            这一版已经实现了三条主线：真实 3D 场景、鼠标画墙，以及九宫/飞星/房间联动的风水信息展示。
-            你可以先从模板起步，再边画边看热力图、气流图和 3D 罗盘。
-          </p>
+    <main className="studio-shell">
+      <header className="studio-topbar">
+        <div className="brand-block">
+          <strong>3D HOUSE FS</strong>
+          <span>{layout.metadata.projectName}</span>
         </div>
-        <div className="hero-chip-row">
-          <span className="hero-chip">Three.js 场景</span>
-          <span className="hero-chip">鼠标画墙</span>
-          <span className="hero-chip">热力图</span>
-          <span className="hero-chip">气流图</span>
-          <span className="hero-chip">九宫飞星</span>
+        <div className="mode-strip" aria-label="编辑模式">
+          <button
+            type="button"
+            className={editorMode === "select" ? "active" : ""}
+            onClick={() => setEditorMode("select")}
+          >
+            选择
+          </button>
+          <button
+            type="button"
+            className={editorMode === "draw-wall" ? "active" : ""}
+            onClick={() => setEditorMode("draw-wall")}
+          >
+            画墙
+          </button>
         </div>
-      </section>
+        <div className="layer-strip" aria-label="三维图层">
+          {[
+            ["heat", "热力图"],
+            ["airflow", "气流图"],
+            ["fengshui", "罗盘风水"],
+            ["walls", "墙体"]
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={layers[key as keyof SceneLayers] ? "active" : ""}
+              onClick={() => toggleLayer(key as keyof SceneLayers)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="status-pill">{validation.length === 0 ? "模型有效" : `${validation.length} 条提醒`}</div>
+      </header>
 
-      <section className="workspace-grid">
-        <aside className="panel stack gap-xl">
-          <QuickStartWizard layout={layout} validationCount={validation.length} />
-          <TemplatePicker currentTemplate={layout.templateId} onSelect={applyTemplate} />
-          <LayoutPersistencePanel layout={layout} onRestoreLayout={restoreLayout} />
+      <div className="studio-body">
+        <nav className="tool-rail" aria-label="主工具">
+          <button type="button" className={editorMode === "select" ? "active" : ""} title="选择" onClick={() => setEditorMode("select")}>↖</button>
+          <button type="button" className={editorMode === "draw-wall" ? "active" : ""} title="画墙" onClick={() => setEditorMode("draw-wall")}>╱</button>
+          <button type="button" className={layers.heat ? "active" : ""} title="热力图" onClick={() => toggleLayer("heat")}>H</button>
+          <button type="button" className={layers.airflow ? "active" : ""} title="气流图" onClick={() => toggleLayer("airflow")}>F</button>
+          <button type="button" className={layers.fengshui ? "active" : ""} title="罗盘风水" onClick={() => toggleLayer("fengshui")}>◎</button>
+        </nav>
+
+        <section className="main-stage">
+          <SceneViewport
+            layout={layout}
+            selectedRoomId={selectedRoomId}
+            selectedWallId={selectedWallId}
+            activePalace={activePalace}
+            editorMode={editorMode}
+            draftWall={draftWall}
+            layers={layers}
+            onSetEditorMode={setEditorMode}
+            onSelectRoom={selectRoom}
+            onSelectWall={setSelectedWallId}
+            onDraftWallChange={setDraftWall}
+            onCommitLayout={replaceLayout}
+            onDeleteSelectedWall={deleteSelectedWall}
+            heatmap={heatmap}
+            airflow={airflow}
+            fengshui={fengshui}
+          />
+        </section>
+
+        <aside className="inspector">
+          <div className="inspector-tabs">
+            <span>属性</span>
+            <span>文件</span>
+            <span>模板</span>
+          </div>
           <LayoutEditor
             layout={layout}
             selectedRoomId={selectedRoomId}
             selectedWallId={selectedWallId}
             editorMode={editorMode}
             onSelectRoom={selectRoom}
-            onSelectWall={selectWall}
+            onSelectWall={setSelectedWallId}
             onSetEditorMode={setEditorMode}
             onDeleteSelectedWall={deleteSelectedWall}
             onUpdateMetadata={updateMetadata}
@@ -267,40 +337,22 @@ export function AppShell() {
             onUpdateSensorPoint={updateSensorPoint}
             onDeleteSensorPoint={deleteSensorPoint}
           />
+          <LayoutPersistencePanel layout={layout} onRestoreLayout={restoreLayout} />
+          <TemplatePicker currentTemplate={layout.templateId} onSelect={applyTemplate} />
         </aside>
+      </div>
 
-        <section className="center-column stack gap-xl">
-          <SceneViewport
-            layout={layout}
-            selectedRoomId={selectedRoomId}
-            selectedWallId={selectedWallId}
-            activePalace={selectedRoomPalace}
-            editorMode={editorMode}
-            draftWall={draftWall}
-            onSetEditorMode={setEditorMode}
-            onSelectRoom={selectRoom}
-            onSelectWall={selectWall}
-            onDraftWallChange={setDraftWall}
-            onCommitLayout={replaceLayout}
-            onDeleteSelectedWall={deleteSelectedWall}
-            heatmap={heatmap}
-            airflow={airflow}
-            fengshui={fengshui}
-          />
-        </section>
-
-        <aside className="panel stack gap-xl">
-          <HeatmapPanel heatmap={heatmap} sensors={layout.sensors} />
-          <AirflowPanel airflow={airflow} rooms={layout.rooms} />
-          <FengshuiPanel
-            layout={layout}
-            fengshui={fengshui}
-            selectedRoomId={selectedRoom?.id ?? null}
-            activePalace={selectedRoomPalace}
-            onSelectRoom={selectRoom}
-          />
-        </aside>
-      </section>
+      <footer className="analysis-dock">
+        <HeatmapPanel heatmap={heatmap} sensors={layout.sensors} />
+        <AirflowPanel airflow={airflow} rooms={layout.rooms} />
+        <FengshuiPanel
+          layout={layout}
+          fengshui={fengshui}
+          selectedRoomId={selectedRoom?.id ?? null}
+          activePalace={activePalace}
+          onSelectRoom={selectRoom}
+        />
+      </footer>
     </main>
   );
 }
