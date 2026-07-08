@@ -89,6 +89,18 @@ export interface SensorPoint {
   temperature: number;
 }
 
+export interface ClimateDevice {
+  id: string;
+  type: "ac" | "kitchen-heat";
+  roomId: string;
+  label: string;
+  x: number;
+  y: number;
+  directionDegrees: number;
+  strength: number;
+  temperatureDelta: number;
+}
+
 export interface HouseOrientation {
   facingDegrees: number;
   facingLabel: CompassDirection;
@@ -116,6 +128,7 @@ export interface HouseLayout {
   walls: WallSegment[];
   openings: Opening[];
   sensors: SensorPoint[];
+  devices: ClimateDevice[];
   weather: WeatherInput;
 }
 

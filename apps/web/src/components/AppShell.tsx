@@ -2,11 +2,15 @@
 
 import {
   analyzeFengshui,
+  clampDeviceToRoom,
+  clampOpeningToWall,
+  createDeviceForRoom,
+  createOpeningForWall,
   createTemplateLayout,
   syncDerivedLayoutData,
   validateLayout
 } from "@fengshui/core";
-import type { HouseLayout, LayoutPoint, SensorPoint, TemplateId } from "@fengshui/core";
+import type { ClimateDevice, HouseLayout, LayoutPoint, Opening, SensorPoint, TemplateId } from "@fengshui/core";
 import { generateAirflow, generateHeatmap } from "@fengshui/simulation";
 import { useMemo, useState } from "react";
 import type { EditorMode } from "../lib/editor";
@@ -210,6 +214,78 @@ export function AppShell() {
     }));
   }
 
+  function addOpening(wallId: string, type: Opening["type"]) {
+    setLayout((current) => {
+      const opening = createOpeningForWall(current, wallId, type);
+      if (!opening) {
+        return current;
+      }
+      return syncDerivedLayoutData({
+        ...current,
+        openings: [...current.openings, opening]
+      });
+    });
+  }
+
+  function updateOpening(openingId: string, patch: Partial<Opening>) {
+    setLayout((current) => {
+      const wallMap = new Map(current.walls.map((wall) => [wall.id, wall]));
+      return syncDerivedLayoutData({
+        ...current,
+        openings: current.openings.map((opening) => {
+          if (opening.id !== openingId) {
+            return opening;
+          }
+          const next = { ...opening, ...patch };
+          const wall = wallMap.get(next.wallId);
+          return wall ? clampOpeningToWall(next, wall) : next;
+        })
+      });
+    });
+  }
+
+  function deleteOpening(openingId: string) {
+    setLayout((current) =>
+      syncDerivedLayoutData({
+        ...current,
+        openings: current.openings.filter((opening) => opening.id !== openingId)
+      })
+    );
+  }
+
+  function addDevice(roomId: string, type: ClimateDevice["type"]) {
+    setLayout((current) => {
+      const device = createDeviceForRoom(current, roomId, type);
+      if (!device) {
+        return current;
+      }
+      return syncDerivedLayoutData({
+        ...current,
+        devices: [...(current.devices ?? []), device]
+      });
+    });
+  }
+
+  function updateDevice(deviceId: string, patch: Partial<ClimateDevice>) {
+    setLayout((current) =>
+      syncDerivedLayoutData({
+        ...current,
+        devices: (current.devices ?? []).map((device) =>
+          device.id === deviceId ? clampDeviceToRoom({ ...device, ...patch }, current) : device
+        )
+      })
+    );
+  }
+
+  function deleteDevice(deviceId: string) {
+    setLayout((current) =>
+      syncDerivedLayoutData({
+        ...current,
+        devices: (current.devices ?? []).filter((device) => device.id !== deviceId)
+      })
+    );
+  }
+
   function replaceLayout(nextLayout: HouseLayout) {
     setLayout(nextLayout);
   }
@@ -336,6 +412,12 @@ export function AppShell() {
             onAddSensorPoint={addSensorPoint}
             onUpdateSensorPoint={updateSensorPoint}
             onDeleteSensorPoint={deleteSensorPoint}
+            onAddOpening={addOpening}
+            onUpdateOpening={updateOpening}
+            onDeleteOpening={deleteOpening}
+            onAddDevice={addDevice}
+            onUpdateDevice={updateDevice}
+            onDeleteDevice={deleteDevice}
           />
           <LayoutPersistencePanel layout={layout} onRestoreLayout={restoreLayout} />
           <TemplatePicker currentTemplate={layout.templateId} onSelect={applyTemplate} />

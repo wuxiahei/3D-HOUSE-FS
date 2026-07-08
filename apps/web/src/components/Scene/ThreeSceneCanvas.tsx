@@ -175,9 +175,97 @@ function makeHeatLegendTexture(minTemp: number, maxTemp: number) {
   return texture;
 }
 
+function makeYinYangTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return new THREE.CanvasTexture(canvas);
+  }
+  context.clearRect(0, 0, 256, 256);
+  context.beginPath();
+  context.arc(128, 128, 120, 0, Math.PI * 2);
+  context.clip();
+  context.fillStyle = "#f6ca38";
+  context.fillRect(0, 0, 128, 256);
+  context.fillStyle = "#1d1408";
+  context.fillRect(128, 0, 128, 256);
+  context.beginPath();
+  context.arc(128, 68, 60, 0, Math.PI * 2);
+  context.fillStyle = "#1d1408";
+  context.fill();
+  context.beginPath();
+  context.arc(128, 188, 60, 0, Math.PI * 2);
+  context.fillStyle = "#f6ca38";
+  context.fill();
+  context.beginPath();
+  context.arc(128, 68, 17, 0, Math.PI * 2);
+  context.fillStyle = "#f6ca38";
+  context.fill();
+  context.beginPath();
+  context.arc(128, 188, 17, 0, Math.PI * 2);
+  context.fillStyle = "#1d1408";
+  context.fill();
+  context.strokeStyle = "#fff7c2";
+  context.lineWidth = 8;
+  context.beginPath();
+  context.arc(128, 128, 120, 0, Math.PI * 2);
+  context.stroke();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function directionVector(direction: string) {
   const angle = directionToRadians(direction);
   return new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).normalize();
+}
+
+function degreesVector(degrees: number) {
+  const angle = THREE.MathUtils.degToRad(degrees);
+  return new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).normalize();
+}
+
+function roundCoord(value: number) {
+  return Number(value.toFixed(3));
+}
+
+function wallKey(wall: { start: { x: number; y: number }; end: { x: number; y: number } }) {
+  const horizontal = Math.abs(wall.start.y - wall.end.y) < 0.001;
+  const vertical = Math.abs(wall.start.x - wall.end.x) < 0.001;
+  if (horizontal) {
+    const y = roundCoord(wall.start.y);
+    return `h:${y}:${Math.min(roundCoord(wall.start.x), roundCoord(wall.end.x))}:${Math.max(roundCoord(wall.start.x), roundCoord(wall.end.x))}`;
+  }
+  if (vertical) {
+    const x = roundCoord(wall.start.x);
+    return `v:${x}:${Math.min(roundCoord(wall.start.y), roundCoord(wall.end.y))}:${Math.max(roundCoord(wall.start.y), roundCoord(wall.end.y))}`;
+  }
+  return `d:${roundCoord(wall.start.x)}:${roundCoord(wall.start.y)}:${roundCoord(wall.end.x)}:${roundCoord(wall.end.y)}`;
+}
+
+function getRenderableWalls(layout: HouseLayout) {
+  const groups = new Map<string, typeof layout.walls>();
+  layout.walls.forEach((wall) => {
+    const key = wall.source === "custom" ? wall.id : wallKey(wall);
+    groups.set(key, [...(groups.get(key) ?? []), wall]);
+  });
+
+  return Array.from(groups.values()).map((walls) => {
+    const first = walls[0];
+    const shared = walls.length > 1;
+    const custom = walls.find((wall) => wall.source === "custom");
+    return {
+      ...first,
+      id: walls.map((wall) => wall.id).join("__"),
+      label: shared ? "公共内墙" : first.label,
+      thickness: custom?.thickness ?? (shared ? 0.11 : 0.24),
+      exterior: !shared,
+      source: custom?.source ?? first.source
+    };
+  });
 }
 
 function directionToRadians(direction: string) {
@@ -514,7 +602,7 @@ function WallMeshes({
 
   return (
     <>
-      {layout.walls.map((wall) => {
+      {getRenderableWalls(layout).map((wall) => {
         const center = wallCenter(wall);
         const length = wallLength(wall);
         const rotation = wallRotationRadians(wall);
@@ -532,7 +620,7 @@ function WallMeshes({
           >
             <boxGeometry args={[length, 2.4, wall.thickness]} />
             <meshStandardMaterial
-              color={wall.source === "custom" ? "#536d88" : "#f7f9fb"}
+              color={wall.source === "custom" ? "#536d88" : wall.exterior ? "#f7f9fb" : "#d9dee0"}
               emissive={isSelected ? "#2a9fd6" : "#000000"}
               emissiveIntensity={isSelected ? 0.28 : 0}
               roughness={0.62}
@@ -572,6 +660,56 @@ function OpeningMeshes({ layout }: { layout: HouseLayout }) {
             <boxGeometry args={[opening.width, opening.height, opening.type === "door" ? 0.08 : 0.04]} />
             <meshStandardMaterial color={opening.type === "door" ? "#7f5b36" : "#4bb2d6"} transparent opacity={opening.type === "door" ? 0.9 : 0.5} />
           </mesh>
+        );
+      })}
+    </>
+  );
+}
+
+function DeviceMeshes({ layout }: { layout: HouseLayout }) {
+  return (
+    <>
+      {(layout.devices ?? []).map((device) => {
+        const direction = degreesVector(device.directionDegrees);
+        const side = new THREE.Vector3(-direction.z, 0, direction.x).normalize();
+        const position: [number, number, number] = [sceneX(layout, device.x), device.type === "ac" ? 1.65 : 0.18, sceneZ(layout, device.y)];
+        const color = device.type === "ac" ? new THREE.Color("#48d6ff") : new THREE.Color("#ff7a22");
+        const flowStart = new THREE.Vector3(position[0], device.type === "ac" ? 1.45 : 0.35, position[2]);
+        const flowEnd = flowStart.clone().add(direction.clone().multiplyScalar(0.9 + device.strength * 0.7));
+        const flowMid = flowStart
+          .clone()
+          .add(direction.clone().multiplyScalar(0.45))
+          .add(side.clone().multiplyScalar(device.type === "ac" ? 0.08 : -0.08));
+
+        return (
+          <group key={device.id}>
+            {device.type === "ac" ? (
+              <group position={position} rotation={[0, -THREE.MathUtils.degToRad(device.directionDegrees), 0]}>
+                <mesh castShadow>
+                  <boxGeometry args={[0.58, 0.22, 0.16]} />
+                  <meshStandardMaterial color="#dff8ff" emissive="#48d6ff" emissiveIntensity={0.12} roughness={0.42} />
+                </mesh>
+                <mesh position={[0, -0.13, 0.05]}>
+                  <boxGeometry args={[0.44, 0.035, 0.045]} />
+                  <meshStandardMaterial color="#2a7085" emissive="#48d6ff" emissiveIntensity={0.18} />
+                </mesh>
+              </group>
+            ) : (
+              <group position={position}>
+                <mesh castShadow>
+                  <cylinderGeometry args={[0.22, 0.25, 0.12, 28]} />
+                  <meshStandardMaterial color="#3a2a1c" roughness={0.55} />
+                </mesh>
+                <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                  <ringGeometry args={[0.12, 0.2, 28]} />
+                  <meshBasicMaterial color="#ff7a22" transparent opacity={0.9} />
+                </mesh>
+              </group>
+            )}
+            <FlowTube points={[flowStart, flowMid, flowEnd]} color={color} radius={device.type === "ac" ? 0.018 : 0.026} opacity={0.68} />
+            <AirflowArrowHead position={flowEnd} direction={direction} color={color} scale={device.type === "ac" ? 0.72 : 0.58} />
+            <LabelSprite text={device.label} position={[position[0], position[1] + 0.34, position[2]]} accent={device.type === "ac" ? "#48d6ff" : "#ff9f43"} />
+          </group>
         );
       })}
     </>
@@ -620,6 +758,33 @@ function BaguaOverlay({
   );
 }
 
+const compassMountains = [
+  "子",
+  "癸",
+  "丑",
+  "艮",
+  "寅",
+  "甲",
+  "卯",
+  "乙",
+  "辰",
+  "巽",
+  "巳",
+  "丙",
+  "午",
+  "丁",
+  "未",
+  "坤",
+  "申",
+  "庚",
+  "酉",
+  "辛",
+  "戌",
+  "乾",
+  "亥",
+  "壬"
+];
+
 function CompassRing({
   layout,
   fengshui,
@@ -629,6 +794,14 @@ function CompassRing({
   fengshui: FengshuiAnalysis;
   visible: boolean;
 }) {
+  const yinYangTexture = useMemo(() => makeYinYangTexture(), []);
+
+  useEffect(() => {
+    return () => {
+      yinYangTexture.dispose();
+    };
+  }, [yinYangTexture]);
+
   if (!visible) {
     return null;
   }
@@ -636,15 +809,48 @@ function CompassRing({
   const radius = Math.max(layout.bounds.width, layout.bounds.depth) / 2 + 1.25;
   const innerRadius = radius - 0.34;
   const midRadius = radius - 0.72;
+  const tickRadius = radius - 0.16;
 
   return (
     <group position={[0, 0.2, 0]}>
-      {[radius, innerRadius, midRadius].map((ringRadius, index) => (
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.025, 0]}>
+        <circleGeometry args={[radius + 0.24, 160]} />
+        <meshBasicMaterial color="#d9aa25" transparent opacity={0.18} depthWrite={false} />
+      </mesh>
+
+      {[radius, innerRadius, midRadius, radius - 1.08, radius - 1.42].map((ringRadius, index) => (
         <mesh key={ringRadius} rotation={[-Math.PI / 2, 0, 0]}>
           <torusGeometry args={[ringRadius, index === 0 ? 0.035 : 0.018, 12, 128]} />
-          <meshStandardMaterial color={index === 0 ? "#101820" : "#d8b451"} emissive={index === 0 ? "#000000" : "#3a2b00"} emissiveIntensity={0.08} />
+          <meshStandardMaterial color={index === 0 ? "#101820" : "#d8b451"} emissive={index === 0 ? "#000000" : "#3a2b00"} emissiveIntensity={0.1} />
         </mesh>
       ))}
+
+      {Array.from({ length: 72 }, (_, index) => {
+        const angle = (index / 72) * Math.PI * 2 - Math.PI / 2;
+        const x = Math.cos(angle);
+        const z = Math.sin(angle);
+        const tickLength = index % 3 === 0 ? 0.2 : 0.11;
+        return (
+          <mesh key={`tick-${index}`} position={[x * tickRadius, 0.035, z * tickRadius]} rotation={[0, -angle, 0]}>
+            <boxGeometry args={[tickLength, 0.018, index % 3 === 0 ? 0.026 : 0.014]} />
+            <meshStandardMaterial color={index % 3 === 0 ? "#2d2110" : "#7a5b18"} />
+          </mesh>
+        );
+      })}
+
+      {compassMountains.map((label, index) => {
+        const angle = (index / compassMountains.length) * Math.PI * 2 - Math.PI / 2;
+        const x = Math.cos(angle);
+        const z = Math.sin(angle);
+        return (
+          <LabelSprite
+            key={label}
+            text={label}
+            position={[x * (radius - 0.52), 0.32, z * (radius - 0.52)]}
+            accent={index % 3 === 0 ? "#101820" : "#5b4212"}
+          />
+        );
+      })}
 
       {fengshui.compass.map((sector, index) => {
         const angle = (index / 8) * Math.PI * 2 - Math.PI / 2;
@@ -677,12 +883,35 @@ function CompassRing({
         </mesh>
       </group>
 
+      <group rotation={[0, -THREE.MathUtils.degToRad(layout.orientation.facingDegrees), 0]}>
+        <mesh position={[radius * 0.36, 0.2, 0]}>
+          <boxGeometry args={[radius * 0.72, 0.08, 0.08]} />
+          <meshStandardMaterial color="#ff7a22" emissive="#a82400" emissiveIntensity={0.22} />
+        </mesh>
+        <mesh position={[-radius * 0.28, 0.19, 0]}>
+          <boxGeometry args={[radius * 0.55, 0.07, 0.07]} />
+          <meshStandardMaterial color="#f3f4f0" emissive="#ffffff" emissiveIntensity={0.08} />
+        </mesh>
+        <mesh position={[radius * 0.78, 0.2, 0]} rotation={[0, 0, -Math.PI / 2]}>
+          <coneGeometry args={[0.2, 0.48, 24]} />
+          <meshStandardMaterial color="#ff4d2e" emissive="#8b1200" emissiveIntensity={0.25} />
+        </mesh>
+        <mesh position={[0, 0.24, 0]}>
+          <sphereGeometry args={[0.18, 24, 24]} />
+          <meshStandardMaterial color="#d7d9d2" metalness={0.6} roughness={0.22} />
+        </mesh>
+      </group>
+
       <group rotation={[0, -THREE.MathUtils.degToRad(layout.orientation.frontDoorDegrees), 0]}>
         <mesh position={[radius * 0.31, 0.13, 0]}>
           <boxGeometry args={[radius * 0.62, 0.035, 0.035]} />
           <meshStandardMaterial color="#28d7a7" emissive="#0d6960" emissiveIntensity={0.12} />
         </mesh>
       </group>
+
+      <sprite position={[0, 0.28, 0]} scale={[1.35, 1.35, 1]}>
+        <spriteMaterial map={yinYangTexture} transparent depthWrite={false} />
+      </sprite>
 
       <LabelSprite
         text={`向${formatDirectionLabel(layout.orientation.facingLabel)} 门${formatDirectionLabel(layout.orientation.frontDoorLabel)}`}
@@ -738,6 +967,7 @@ export function ThreeSceneCanvas({
       <AirflowOverlay layout={layout} airflow={airflow} selectedRoomId={selectedRoomId} visible={layers.airflow} />
       <WallMeshes layout={layout} selectedWallId={selectedWallId} visible={layers.walls} onSelectWall={onSelectWall} />
       <OpeningMeshes layout={layout} />
+      <DeviceMeshes layout={layout} />
 
       <gridHelper args={[layout.bounds.width + 4, 24, "#335066", "#233544"]} position={[0, 0.01, 0]} />
       <Controls />

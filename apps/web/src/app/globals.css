@@ -32,6 +32,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -54,6 +55,7 @@ button:disabled {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -378,6 +380,8 @@ textarea {
 }
 
 .sensor-editor-list,
+.opening-editor-list,
+.device-editor-list,
 .wall-list,
 .template-grid {
   display: grid;
@@ -389,6 +393,24 @@ textarea {
   grid-template-columns: 1.6fr 0.7fr 0.7fr 0.9fr auto;
   gap: 6px;
   align-items: end;
+}
+
+.opening-editor-row {
+  display: grid;
+  grid-template-columns: 0.75fr 1.4fr 0.65fr 0.75fr auto;
+  gap: 6px;
+  align-items: end;
+}
+
+.device-editor-row {
+  display: grid;
+  grid-template-columns: 1.3fr 0.9fr repeat(5, 0.68fr) auto;
+  gap: 6px;
+  align-items: end;
+}
+
+.wide-field {
+  min-width: 0;
 }
 
 .wall-pill,
@@ -456,6 +478,19 @@ textarea {
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 10px;
+}
+
+.compass-reading {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.compass-reading p {
+  margin: 0;
+  color: #cbd8d2;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .dock-metrics span,

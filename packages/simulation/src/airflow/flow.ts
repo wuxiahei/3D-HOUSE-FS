@@ -10,17 +10,30 @@ function nextDirection(direction: (typeof directionSequence)[number]) {
 
 export function generateAirflow(layout: HouseLayout): AirflowVector[] {
   const incoming = degreesToDirection(layout.weather.windDirection);
-  return layout.rooms.map((room, index) => {
+
+  return layout.rooms.map((room) => {
     const openingCount = layout.openings.filter((opening) => opening.wallId.startsWith(room.id)).length;
-    const strength = Number(Math.min(1, 0.25 + openingCount * 0.18 + layout.weather.windSpeed / 8).toFixed(2));
+    const ac = (layout.devices ?? []).find((device) => device.roomId === room.id && device.type === "ac");
+    const heatSource = (layout.devices ?? []).find((device) => device.roomId === room.id && device.type === "kitchen-heat");
+    const toDirection = ac ? degreesToDirection(ac.directionDegrees) : nextDirection(incoming);
+    const strength = Number(
+      Math.min(
+        1,
+        0.18 +
+          openingCount * 0.12 +
+          layout.weather.windSpeed / 10 +
+          (ac ? ac.strength * 0.28 : 0) +
+          (heatSource ? heatSource.strength * 0.08 : 0)
+      ).toFixed(2)
+    );
+
     return {
       id: `flow-${room.id}`,
       roomId: room.id,
       fromDirection: incoming,
-      toDirection: nextDirection(incoming),
+      toDirection,
       strength,
-      explanation: `${room.name} 当前基于 ${openingCount} 个门窗开口和室外 ${layout.weather.windSpeed}m/s 风速做简化估算。`
+      explanation: `${room.name} 基于 ${openingCount} 个门窗开口、室外 ${layout.weather.windSpeed}m/s 风速${ac ? `、${ac.label}送风` : ""}${heatSource ? `、${heatSource.label}热浮力` : ""}进行简化估算。`
     };
   });
 }
-

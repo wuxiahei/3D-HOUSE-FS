@@ -1,4 +1,5 @@
 import type {
+  ClimateDevice,
   CompassDirection,
   HouseLayout,
   LayoutPoint,
@@ -198,6 +199,51 @@ export function createOpeningForWall(
   );
 }
 
+export function clampDeviceToRoom(device: ClimateDevice, layout: HouseLayout): ClimateDevice {
+  const room = layout.rooms.find((item) => item.id === device.roomId) ?? layout.rooms[0];
+  if (!room) {
+    return device;
+  }
+
+  return {
+    ...device,
+    x: Number(Math.min(room.origin.x + room.width, Math.max(room.origin.x, device.x)).toFixed(2)),
+    y: Number(Math.min(room.origin.y + room.depth, Math.max(room.origin.y, device.y)).toFixed(2)),
+    strength: Number(Math.min(1, Math.max(0.05, device.strength)).toFixed(2)),
+    temperatureDelta: Number(device.temperatureDelta.toFixed(1)),
+    directionDegrees: normalizeDegrees(device.directionDegrees)
+  };
+}
+
+export function createDeviceForRoom(
+  layout: HouseLayout,
+  roomId: string,
+  type: ClimateDevice["type"]
+): ClimateDevice | null {
+  const room = layout.rooms.find((item) => item.id === roomId);
+  if (!room) {
+    return null;
+  }
+
+  const count = (layout.devices ?? []).filter((device) => device.type === type).length + 1;
+  const isAc = type === "ac";
+
+  return clampDeviceToRoom(
+    {
+      id: `${type}-${Date.now()}-${count}`,
+      type,
+      roomId,
+      label: isAc ? `空调 ${count}` : `厨房热源 ${count}`,
+      x: Number((room.origin.x + room.width * (isAc ? 0.82 : 0.5)).toFixed(2)),
+      y: Number((room.origin.y + room.depth * (isAc ? 0.18 : 0.55)).toFixed(2)),
+      directionDegrees: isAc ? 180 : 0,
+      strength: isAc ? 0.72 : 0.8,
+      temperatureDelta: isAc ? -4.5 : 5.5
+    },
+    layout
+  );
+}
+
 export function syncDerivedLayoutData(layout: HouseLayout): HouseLayout {
   const roomWalls = buildWallsFromRooms(layout.rooms, 0.18);
   const customWalls = layout.walls.filter((wall) => wall.source === "custom");
@@ -215,6 +261,7 @@ export function syncDerivedLayoutData(layout: HouseLayout): HouseLayout {
     openings: layout.openings.map((opening) => {
       const wall = wallMap.get(opening.wallId);
       return wall ? clampOpeningToWall(opening, wall) : opening;
-    })
+    }),
+    devices: (layout.devices ?? []).map((device) => clampDeviceToRoom(device, layout))
   };
 }

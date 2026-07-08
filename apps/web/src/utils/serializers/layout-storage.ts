@@ -78,6 +78,7 @@ export function normalizeImportedLayout(value: unknown): HouseLayout {
     walls: Array.isArray(value.walls) ? (value.walls as HouseLayout["walls"]) : [],
     openings: Array.isArray(value.openings) ? (value.openings as HouseLayout["openings"]) : [],
     sensors: Array.isArray(value.sensors) ? (value.sensors as HouseLayout["sensors"]) : [],
+    devices: Array.isArray(value.devices) ? (value.devices as HouseLayout["devices"]) : [],
     weather: {
       windDirection: numberValue(weather.windDirection, fallback.weather.windDirection),
       windSpeed: numberValue(weather.windSpeed, fallback.weather.windSpeed),

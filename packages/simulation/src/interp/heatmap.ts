@@ -1,4 +1,4 @@
-import type { HeatmapCell, HouseLayout, SensorPoint } from "@fengshui/core";
+import type { ClimateDevice, HeatmapCell, HouseLayout, SensorPoint } from "@fengshui/core";
 
 function distance(a: { x: number; y: number }, b: { x: number; y: number }) {
   return Math.max(0.25, Math.hypot(a.x - b.x, a.y - b.y));
@@ -6,13 +6,10 @@ function distance(a: { x: number; y: number }, b: { x: number; y: number }) {
 
 function inferTemperature(
   sensors: SensorPoint[],
+  devices: ClimateDevice[],
   point: { x: number; y: number },
   outdoorTemperature: number
 ): number {
-  if (sensors.length === 0) {
-    return outdoorTemperature - 4;
-  }
-
   let weighted = 0;
   let totalWeight = 0;
 
@@ -22,7 +19,13 @@ function inferTemperature(
     totalWeight += weight;
   });
 
-  return weighted / totalWeight;
+  const sensorTemperature = totalWeight > 0 ? weighted / totalWeight : outdoorTemperature - 4;
+  const deviceDelta = devices.reduce((delta, device) => {
+    const falloff = 1 / Math.max(0.35, distance(device, point));
+    return delta + device.temperatureDelta * device.strength * falloff * 0.42;
+  }, 0);
+
+  return sensorTemperature + deviceDelta;
 }
 
 export function generateHeatmap(layout: HouseLayout, gridSize = 6): HeatmapCell[] {
@@ -37,7 +40,7 @@ export function generateHeatmap(layout: HouseLayout, gridSize = 6): HeatmapCell[
         y: row * cellDepth + cellDepth / 2
       };
 
-      const temperature = inferTemperature(layout.sensors, center, layout.weather.outdoorTemperature);
+      const temperature = inferTemperature(layout.sensors, layout.devices ?? [], center, layout.weather.outdoorTemperature);
       const solarBoost = row > gridSize / 2 ? 0.8 : 0.2;
       const adjustedTemperature = Number((temperature + solarBoost).toFixed(1));
       const intensity = Math.max(0, Math.min(1, (adjustedTemperature - 20) / 12));
@@ -56,4 +59,3 @@ export function generateHeatmap(layout: HouseLayout, gridSize = 6): HeatmapCell[
 
   return cells;
 }
-
