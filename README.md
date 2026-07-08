@@ -11,7 +11,7 @@
 
 - `apps/web`: Next.js front-end prototype
 - `packages/core`: shared layout types, validation, geometry helpers, fengshui helpers
-- `packages/simulation`: heatmap and airflow calculation helpers
+- `packages/simulation`: client-side thermal diffusion and airflow field solvers
 - `backend`: FastAPI service stubs for analysis and future AI/CFD expansion
 
 ## Run
@@ -38,12 +38,13 @@ This first implementation focuses on the MVP backbone:
 
 - shared `HouseLayout` schema
 - template-driven beginner editor experience
-- heatmap, airflow, and fengshui information views
+- physics-lite heatmap, animated airflow, and fengshui information views
 - 3D compass-oriented fengshui visualization
 - backend API stubs aligned with the same data model
+- no backend GPU or CFD service is required for the current visual solvers
 
 ## Notes
 
 - Fengshui outputs are informational references, not prescriptive conclusions.
-- The front-end currently uses a lightweight visualization-first scene instead of a full Three.js production renderer.
-
+- Thermal rendering uses a field `DataTexture` with shader contours.
+- Airflow rendering uses pressure-lite velocity fields, streamlines, and animated particles.

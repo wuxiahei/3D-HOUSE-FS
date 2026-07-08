@@ -1,17 +1,32 @@
 :root {
   color-scheme: dark;
-  --bg: #0e1111;
-  --topbar: #161b1b;
-  --panel: #1c2222;
-  --panel-2: #242b2b;
+  --bg-0: #0d1114;
+  --bg-1: #131a1d;
+  --bg-2: #192225;
+  --bg-3: #212b2f;
+  --bg: var(--bg-0);
+  --topbar: var(--bg-1);
+  --panel: var(--bg-2);
+  --panel-2: var(--bg-3);
   --line: rgba(255, 255, 255, 0.11);
   --line-strong: rgba(255, 255, 255, 0.2);
   --text: #f4f7f5;
   --muted: #9aa7a1;
+  --faint: #6f7b78;
+  --accent: #39b7ff;
+  --heat: #ff6b38;
+  --flow: #47d7ff;
+  --fengshui: #f4c84a;
   --cyan: #19c2ff;
   --green: #28d7a7;
   --gold: #ffd166;
   --red: #ff5f46;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.32);
 }
 
@@ -71,19 +86,19 @@ textarea {
 
 .studio-shell {
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr) 164px;
+  grid-template-rows: 52px minmax(0, 1fr) 152px;
   width: 100vw;
   height: 100vh;
-  background: #0e1111;
+  background: var(--bg-0);
 }
 
 .studio-topbar {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto auto auto;
   align-items: center;
-  gap: 14px;
-  height: 48px;
-  padding: 0 12px;
+  gap: var(--space-3);
+  height: 52px;
+  padding: 0 var(--space-3);
   border-bottom: 1px solid var(--line);
   background: var(--topbar);
 }
@@ -121,7 +136,8 @@ textarea {
 .layer-strip button,
 .segmented button,
 .tool-row button,
-.file-button {
+.file-button,
+.aux-layer-toggle {
   min-height: 30px;
   padding: 5px 10px;
   font-size: 13px;
@@ -129,10 +145,31 @@ textarea {
 
 .mode-strip button.active,
 .layer-strip button.active,
-.segmented button.active {
+.segmented button.active,
+.aux-layer-toggle.active {
   border-color: var(--cyan);
   background: rgba(25, 194, 255, 0.16);
   color: #dff7ff;
+}
+
+.analysis-switch button,
+.aux-layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.analysis-switch button.current {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.analysis-switch svg,
+.aux-layer-toggle svg,
+.tool-rail svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+  flex: 0 0 auto;
 }
 
 .status-pill {
@@ -164,6 +201,8 @@ textarea {
   width: 38px;
   height: 38px;
   padding: 0;
+  display: grid;
+  place-items: center;
   font-weight: 700;
 }
 
@@ -267,15 +306,25 @@ textarea {
   z-index: 2;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
   border-bottom: 1px solid var(--line);
-  background: #171d1d;
+  background: var(--line);
 }
 
-.inspector-tabs span {
-  padding: 10px;
+.inspector-tabs button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 0;
+  background: #171d1d;
   color: var(--muted);
   font-size: 13px;
   text-align: center;
+}
+
+.inspector-tabs button.active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .inspector-section {
@@ -458,18 +507,90 @@ textarea {
 
 .analysis-dock {
   display: grid;
-  grid-template-columns: 1fr 1fr 1.4fr;
+  grid-template-columns: minmax(0, 1fr) 330px;
   gap: 1px;
   min-height: 0;
   border-top: 1px solid var(--line);
   background: var(--line);
 }
 
+.dock-main {
+  min-width: 0;
+  min-height: 0;
+}
+
 .dock-panel {
   min-width: 0;
+  height: 100%;
   overflow: auto;
   padding: 12px 14px;
   background: #151a1a;
+}
+
+.analysis-controls {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: #141b1d;
+}
+
+.toggle-field,
+.range-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.toggle-field {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.toggle-field input {
+  width: 16px;
+  height: 16px;
+}
+
+.range-field input {
+  accent-color: var(--accent);
+}
+
+.legend-bar {
+  height: 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.heat-legend {
+  background: linear-gradient(90deg, #1537c9, #00a6ff, #20d6a3, #f4e64a, #ff8b22, #e8202a);
+}
+
+.flow-legend {
+  background: linear-gradient(90deg, #1a4f75, #27b7d8, #a8fff0, #f7d45a);
+}
+
+.legend-readout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.legend-readout span:nth-child(2) {
+  text-align: center;
+}
+
+.legend-readout span:last-child {
+  text-align: right;
+}
+
+.legend-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .dock-metrics,

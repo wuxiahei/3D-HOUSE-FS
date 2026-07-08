@@ -11,7 +11,8 @@ import type {
   SensorPoint
 } from "@fengshui/core";
 import { wallCenter, wallLength, wallRotationRadians } from "@fengshui/core";
-import type { SceneLayers } from "../AppShell";
+import type { AnalysisControls, SceneLayers } from "../AppShell";
+import type { FlowField, HeatField } from "@fengshui/simulation";
 import { formatDirectionLabel } from "../../lib/editor";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
@@ -47,6 +48,61 @@ function colorFromRamp(intensity: number) {
   const lower = heatStops[Math.max(0, heatStops.indexOf(upper) - 1)];
   const span = Math.max(0.001, upper.at - lower.at);
   return lower.color.clone().lerp(upper.color, (value - lower.at) / span);
+}
+
+function makeScalarTexture(data: Float32Array, width: number, height: number) {
+  const texture = new THREE.DataTexture(data, width, height, THREE.RedFormat, THREE.FloatType);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function makeMaskTexture(data: Uint8Array, width: number, height: number) {
+  const texture = new THREE.DataTexture(data, width, height, THREE.RedFormat, THREE.UnsignedByteType);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function cellAt(field: FlowField, x: number, y: number) {
+  const column = Math.floor((x - field.grid.originX) / field.grid.cellSize);
+  const row = Math.floor((y - field.grid.originY) / field.grid.cellSize);
+  if (column < 0 || column >= field.grid.cols || row < 0 || row >= field.grid.rows) {
+    return null;
+  }
+  const index = row * field.grid.cols + column;
+  if (!field.grid.interior[index]) {
+    return null;
+  }
+  return { column, row, index };
+}
+
+function sampleFlowField(field: FlowField, x: number, y: number) {
+  const cell = cellAt(field, x, y);
+  if (!cell) {
+    return { x: 0, y: 0, speed: 0 };
+  }
+  const vx = field.vx[cell.index];
+  const vy = field.vy[cell.index];
+  return { x: vx, y: vy, speed: Math.hypot(vx, vy) };
+}
+
+function pointRoomId(layout: HouseLayout, x: number, y: number) {
+  return (
+    layout.rooms.find(
+      (room) =>
+        x >= room.origin.x &&
+        x <= room.origin.x + room.width &&
+        y >= room.origin.y &&
+        y <= room.origin.y + room.depth
+    )?.id ?? null
+  );
 }
 
 function pointInAnyRoom(layout: HouseLayout, point: { x: number; y: number }) {
@@ -441,6 +497,136 @@ function HeatmapOverlay({
   );
 }
 
+const heatVertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const heatFragmentShader = `
+  #extension GL_OES_standard_derivatives : enable
+  precision highp float;
+  uniform sampler2D uTemperature;
+  uniform sampler2D uMask;
+  uniform float uMin;
+  uniform float uMax;
+  uniform float uTime;
+  uniform bool uContours;
+  varying vec2 vUv;
+
+  vec3 ramp(float t) {
+    vec3 c0 = vec3(0.055, 0.141, 0.612);
+    vec3 c1 = vec3(0.000, 0.620, 0.910);
+    vec3 c2 = vec3(0.070, 0.720, 0.520);
+    vec3 c3 = vec3(0.930, 0.800, 0.180);
+    vec3 c4 = vec3(0.950, 0.360, 0.120);
+    vec3 c5 = vec3(0.780, 0.065, 0.140);
+    if (t < 0.20) return mix(c0, c1, t / 0.20);
+    if (t < 0.42) return mix(c1, c2, (t - 0.20) / 0.22);
+    if (t < 0.64) return mix(c2, c3, (t - 0.42) / 0.22);
+    if (t < 0.84) return mix(c3, c4, (t - 0.64) / 0.20);
+    return mix(c4, c5, (t - 0.84) / 0.16);
+  }
+
+  void main() {
+    float mask = texture2D(uMask, vUv).r;
+    if (mask < 0.5) discard;
+    float temperature = texture2D(uTemperature, vUv).r;
+    float n = clamp((temperature - uMin) / max(0.001, uMax - uMin), 0.0, 1.0);
+    float cloud = clamp(n + sin((vUv.x * 9.0 + vUv.y * 7.0 + uTime * 0.18)) * 0.012, 0.0, 1.0);
+    vec3 color = ramp(cloud);
+
+    if (uContours) {
+      float band = n * 11.0;
+      float contour = abs(fract(band) - 0.5);
+      float width = max(fwidth(band) * 1.35, 0.012);
+      float line = 1.0 - smoothstep(width, width * 2.0, contour);
+      color = mix(color, vec3(1.0), line * 0.42);
+    }
+
+    gl_FragColor = vec4(color, 0.86);
+  }
+`;
+
+function HeatFieldOverlay({
+  layout,
+  field,
+  sensors,
+  visible,
+  showContours
+}: {
+  layout: HouseLayout;
+  field: HeatField;
+  sensors: SensorPoint[];
+  visible: boolean;
+  showContours: boolean;
+}) {
+  const temperatureTexture = useMemo(
+    () => makeScalarTexture(field.temperature, field.grid.cols, field.grid.rows),
+    [field]
+  );
+  const maskTexture = useMemo(
+    () => makeMaskTexture(field.grid.interior, field.grid.cols, field.grid.rows),
+    [field]
+  );
+  const uniforms = useMemo(
+    () => ({
+      uTemperature: { value: temperatureTexture },
+      uMask: { value: maskTexture },
+      uMin: { value: field.min },
+      uMax: { value: field.max },
+      uTime: { value: 0 },
+      uContours: { value: showContours }
+    }),
+    [field.max, field.min, maskTexture, showContours, temperatureTexture]
+  );
+
+  useFrame(({ clock }) => {
+    uniforms.uTime.value = clock.elapsedTime;
+  });
+
+  useEffect(() => {
+    return () => {
+      temperatureTexture.dispose();
+      maskTexture.dispose();
+    };
+  }, [maskTexture, temperatureTexture]);
+
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <>
+      <mesh position={[0, 0.106, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[layout.bounds.width, layout.bounds.depth, 1, 1]} />
+        <shaderMaterial
+          vertexShader={heatVertexShader}
+          fragmentShader={heatFragmentShader}
+          uniforms={uniforms}
+          transparent
+          depthWrite={false}
+        />
+      </mesh>
+      {sensors.map((sensor) => (
+        <group key={sensor.id} position={[sceneX(layout, sensor.x), 0.42, sceneZ(layout, sensor.y)]}>
+          <mesh>
+            <sphereGeometry args={[0.1, 18, 18]} />
+            <meshStandardMaterial color={colorFromRamp((sensor.temperature - field.min) / Math.max(0.1, field.max - field.min))} emissive="#ff7a00" emissiveIntensity={0.25} />
+          </mesh>
+          <mesh position={[0, -0.18, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.13, 0.2, 24]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.72} depthWrite={false} />
+          </mesh>
+          <LabelSprite text={`${sensor.temperature.toFixed(1)}C`} position={[0, 0.3, 0]} accent="#ffd166" />
+        </group>
+      ))}
+    </>
+  );
+}
+
 function FlowTube({
   points,
   color,
@@ -578,6 +764,203 @@ function AirflowOverlay({
               </group>
             ))}
             <LabelSprite text={`${Math.round(flow.strength * 100)}%`} position={[center.x, 1.58, center.z]} accent="#9af8ff" />
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
+function AirflowParticles({
+  layout,
+  field,
+  selectedRoomId,
+  density,
+  speedScale,
+  animate
+}: {
+  layout: HouseLayout;
+  field: FlowField;
+  selectedRoomId: string | null;
+  density: number;
+  speedScale: number;
+  animate: boolean;
+}) {
+  const particleBundle = useMemo(() => {
+    const count = Math.round(THREE.MathUtils.lerp(360, 1450, density));
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const life = new Float32Array(count);
+    const color = new THREE.Color();
+
+    const seeds =
+      field.inlets.length > 0
+        ? field.inlets
+        : layout.rooms.map((room) => ({
+            x: room.origin.x + room.width * 0.5,
+            y: room.origin.y + room.depth * 0.5,
+            strength: 0.25
+          }));
+
+    function respawn(index: number) {
+      const seed = seeds[Math.floor(Math.random() * seeds.length)] ?? {
+        x: layout.bounds.width / 2,
+        y: layout.bounds.depth / 2,
+        strength: 0.2
+      };
+      const jitter = field.grid.cellSize * 2.2;
+      const x = THREE.MathUtils.clamp(seed.x + (Math.random() - 0.5) * jitter, 0, layout.bounds.width);
+      const y = THREE.MathUtils.clamp(seed.y + (Math.random() - 0.5) * jitter, 0, layout.bounds.depth);
+      const velocity = sampleFlowField(field, x, y);
+      const speed = Math.min(1, velocity.speed / Math.max(0.001, field.speedMax));
+      color.copy(colorFromRamp(0.18 + speed * 0.72));
+
+      positions[index * 3] = sceneX(layout, x);
+      positions[index * 3 + 1] = 0.28 + speed * 0.72 + Math.random() * 0.2;
+      positions[index * 3 + 2] = sceneZ(layout, y);
+      colors[index * 3] = color.r;
+      colors[index * 3 + 1] = color.g;
+      colors[index * 3 + 2] = color.b;
+      life[index] = 1.2 + Math.random() * 2.6 + seed.strength * 0.8;
+    }
+
+    for (let index = 0; index < count; index += 1) {
+      respawn(index);
+    }
+
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+    return { count, geometry, positions, colors, life, respawn };
+  }, [density, field, layout]);
+
+  useEffect(() => {
+    return () => {
+      particleBundle.geometry.dispose();
+    };
+  }, [particleBundle]);
+
+  useFrame(({ clock }, delta) => {
+    if (!animate) {
+      return;
+    }
+    const color = new THREE.Color();
+    for (let index = 0; index < particleBundle.count; index += 1) {
+      const px = particleBundle.positions[index * 3] + layout.bounds.width / 2;
+      const py = particleBundle.positions[index * 3 + 2] + layout.bounds.depth / 2;
+      const velocity = sampleFlowField(field, px, py);
+      const speed = velocity.speed;
+      const speedNorm = Math.min(1, speed / Math.max(0.001, field.speedMax));
+      particleBundle.life[index] -= delta * (0.58 + speedNorm);
+
+      if (particleBundle.life[index] <= 0 || speedNorm < 0.025 || !cellAt(field, px, py)) {
+        particleBundle.respawn(index);
+        continue;
+      }
+
+      const step = delta * speedScale * (0.6 + speedNorm * 1.8);
+      const nextX = px + (velocity.x / Math.max(0.0001, speed)) * step;
+      const nextY = py + (velocity.y / Math.max(0.0001, speed)) * step;
+      if (!cellAt(field, nextX, nextY)) {
+        particleBundle.respawn(index);
+        continue;
+      }
+
+      const roomId = pointRoomId(layout, nextX, nextY);
+      const dim = selectedRoomId && roomId !== selectedRoomId ? 0.45 : 1;
+      color.copy(colorFromRamp(0.18 + speedNorm * 0.72)).multiplyScalar(dim);
+
+      particleBundle.positions[index * 3] = sceneX(layout, nextX);
+      particleBundle.positions[index * 3 + 1] = 0.24 + speedNorm * 0.74 + Math.sin(clock.elapsedTime * 4 + index) * 0.035;
+      particleBundle.positions[index * 3 + 2] = sceneZ(layout, nextY);
+      particleBundle.colors[index * 3] = color.r;
+      particleBundle.colors[index * 3 + 1] = color.g;
+      particleBundle.colors[index * 3 + 2] = color.b;
+    }
+
+    const positions = particleBundle.geometry.getAttribute("position");
+    const colors = particleBundle.geometry.getAttribute("color");
+    positions.needsUpdate = true;
+    colors.needsUpdate = true;
+  });
+
+  return (
+    <points geometry={particleBundle.geometry}>
+      <pointsMaterial size={0.055} vertexColors transparent opacity={0.78} depthWrite={false} blending={THREE.AdditiveBlending} />
+    </points>
+  );
+}
+
+function AirflowFieldOverlay({
+  layout,
+  field,
+  selectedRoomId,
+  visible,
+  controls
+}: {
+  layout: HouseLayout;
+  field: FlowField;
+  selectedRoomId: string | null;
+  visible: boolean;
+  controls: AnalysisControls;
+}) {
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <>
+      <AirflowParticles
+        layout={layout}
+        field={field}
+        selectedRoomId={selectedRoomId}
+        density={controls.airflowParticleDensity}
+        speedScale={controls.airflowParticleSpeed}
+        animate={controls.animateAirflow}
+      />
+      {field.streamlines.map((streamline, index) => {
+        const speedNorm = Math.min(1, streamline.speed / Math.max(0.001, field.speedMax));
+        const selected =
+          selectedRoomId &&
+          streamline.points.some(([x, y]) => pointRoomId(layout, x, y) === selectedRoomId);
+        const color = colorFromRamp(0.24 + speedNorm * 0.68);
+        const points = streamline.points.map(
+          ([x, y], pointIndex) =>
+            new THREE.Vector3(
+              sceneX(layout, x),
+              selected ? 0.34 + (pointIndex % 3) * 0.02 : 0.22 + (index % 2) * 0.08,
+              sceneZ(layout, y)
+            )
+        );
+        if (points.length < 2) {
+          return null;
+        }
+        const end = points[points.length - 1];
+        const prev = points[Math.max(0, points.length - 2)];
+        const direction = end.clone().sub(prev).normalize();
+        return (
+          <group key={`stream-${index}`}>
+            <FlowTube points={points} color={color} radius={selected ? 0.032 : 0.019} opacity={selected ? 0.92 : 0.64} />
+            <AirflowArrowHead position={end.clone().setY(end.y + 0.04)} direction={direction} color={color} scale={0.7 + speedNorm * 0.45} />
+          </group>
+        );
+      })}
+      {field.inlets.slice(0, 14).map((inlet, index) => {
+        const velocity = sampleFlowField(field, inlet.x, inlet.y);
+        const direction = new THREE.Vector3(velocity.x, 0, velocity.y);
+        if (direction.lengthSq() < 0.0001) {
+          direction.set(1, 0, 0);
+        }
+        direction.normalize();
+        const color = colorFromRamp(0.34 + Math.min(1, inlet.strength / Math.max(0.001, field.speedMax)) * 0.5);
+        const center = new THREE.Vector3(sceneX(layout, inlet.x), 0, sceneZ(layout, inlet.y));
+        return (
+          <group key={`inlet-${index}`}>
+            <AirflowCurtain center={center} direction={direction} width={0.42 + inlet.strength * 0.18} height={1.35} color={color} />
+            {index < 4 ? (
+              <LabelSprite text={`${Math.round(inlet.strength * 100)}`} position={[center.x, 1.5, center.z]} accent="#9af8ff" />
+            ) : null}
           </group>
         );
       })}
@@ -928,9 +1311,12 @@ export function ThreeSceneCanvas({
   selectedWallId,
   heatmap,
   airflow,
+  heatField,
+  flowField,
   fengshui,
   activePalace,
   layers,
+  controls,
   onSelectRoom,
   onSelectWall
 }: {
@@ -939,9 +1325,12 @@ export function ThreeSceneCanvas({
   selectedWallId: string | null;
   heatmap: HeatmapCell[];
   airflow: AirflowVector[];
+  heatField: HeatField;
+  flowField: FlowField;
   fengshui: FengshuiAnalysis;
   activePalace: BaguaPalace | null;
   layers: SceneLayers;
+  controls: AnalysisControls;
   onSelectRoom: (roomId: string) => void;
   onSelectWall: (wallId: string | null) => void;
 }) {
@@ -963,8 +1352,20 @@ export function ThreeSceneCanvas({
       <CompassRing layout={layout} fengshui={fengshui} visible={layers.fengshui} />
       <BaguaOverlay layout={layout} fengshui={fengshui} activePalace={activePalace} visible={layers.fengshui} />
       <RoomMeshes layout={layout} selectedRoomId={selectedRoomId} onSelectRoom={onSelectRoom} />
-      <HeatmapOverlay layout={layout} heatmap={heatmap} sensors={layout.sensors} visible={layers.heat} />
-      <AirflowOverlay layout={layout} airflow={airflow} selectedRoomId={selectedRoomId} visible={layers.airflow} />
+      <HeatFieldOverlay
+        layout={layout}
+        field={heatField}
+        sensors={layout.sensors}
+        visible={layers.heat}
+        showContours={controls.showHeatContours}
+      />
+      <AirflowFieldOverlay
+        layout={layout}
+        field={flowField}
+        selectedRoomId={selectedRoomId}
+        visible={layers.airflow}
+        controls={controls}
+      />
       <WallMeshes layout={layout} selectedWallId={selectedWallId} visible={layers.walls} onSelectWall={onSelectWall} />
       <OpeningMeshes layout={layout} />
       <DeviceMeshes layout={layout} />

@@ -1,12 +1,15 @@
 import type { AirflowVector, Room } from "@fengshui/core";
+import type { FlowField } from "@fengshui/simulation";
 import { formatDirectionLabel } from "../../lib/editor";
 
 export function AirflowPanel({
   airflow,
-  rooms
+  rooms,
+  field
 }: {
   airflow: AirflowVector[];
   rooms: Room[];
+  field?: FlowField;
 }) {
   const strongest = [...airflow].sort((a, b) => b.strength - a.strength)[0];
   const strongestRoom = rooms.find((room) => room.id === strongest?.roomId);
@@ -14,14 +17,17 @@ export function AirflowPanel({
   return (
     <section className="dock-panel">
       <div className="dock-title">
-        <strong>气流图层</strong>
-        <span>箭头已进入 3D 房间</span>
+        <strong>Airflow field</strong>
+        <span>{field ? `${field.streamlines.length} streamlines` : "summary"}</span>
       </div>
       {strongest ? (
         <div className="dock-metrics">
           <span>{strongestRoom?.name ?? strongest.roomId}</span>
-          <span>{formatDirectionLabel(strongest.fromDirection)} → {formatDirectionLabel(strongest.toDirection)}</span>
+          <span>
+            {formatDirectionLabel(strongest.fromDirection)} to {formatDirectionLabel(strongest.toDirection)}
+          </span>
           <span>{Math.round(strongest.strength * 100)}%</span>
+          {field ? <span>Peak {field.speedMax.toFixed(2)}</span> : null}
         </div>
       ) : null}
       <div className="flow-strip">

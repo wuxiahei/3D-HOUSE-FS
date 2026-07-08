@@ -14,9 +14,10 @@ import {
   snapOrthogonal,
   syncDerivedLayoutData
 } from "@fengshui/core";
+import type { FlowField, HeatField } from "@fengshui/simulation";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRef } from "react";
-import type { SceneLayers } from "../AppShell";
+import type { AnalysisControls, SceneLayers } from "../AppShell";
 import type { EditorMode } from "../../lib/editor";
 import { ThreeSceneCanvas } from "./ThreeSceneCanvas";
 
@@ -55,6 +56,9 @@ export function SceneViewport({
   onDeleteSelectedWall,
   heatmap,
   airflow,
+  heatField,
+  flowField,
+  controls,
   fengshui
 }: {
   layout: HouseLayout;
@@ -72,6 +76,9 @@ export function SceneViewport({
   onDeleteSelectedWall: () => void;
   heatmap: HeatmapCell[];
   airflow: AirflowVector[];
+  heatField: HeatField;
+  flowField: FlowField;
+  controls: AnalysisControls;
   fengshui: FengshuiAnalysis;
 }) {
   const drawingRef = useRef<HTMLDivElement | null>(null);
@@ -123,6 +130,9 @@ export function SceneViewport({
         layers={layers}
         onSelectRoom={onSelectRoom}
         onSelectWall={onSelectWall}
+        heatField={heatField}
+        flowField={flowField}
+        controls={controls}
       />
 
       <div className="viewport-hud top-left">
