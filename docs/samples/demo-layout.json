@@ -1,0 +1,65 @@
+{
+  "id": "layout-compact-two-room",
+  "templateId": "compact-two-room",
+  "metadata": {
+    "projectName": "示例两居",
+    "address": "上海市示例地址 88 号",
+    "latitude": 31.2304,
+    "longitude": 121.4737,
+    "timezone": "Asia/Shanghai",
+    "buildYear": 2018,
+    "renovationYear": 2024
+  },
+  "bounds": {
+    "width": 8.8,
+    "depth": 6.8,
+    "height": 2.9
+  },
+  "orientation": {
+    "facingDegrees": 135,
+    "facingLabel": "SE",
+    "frontDoorDegrees": 90,
+    "frontDoorLabel": "E"
+  },
+  "rooms": [
+    {
+      "id": "living",
+      "name": "客餐厅",
+      "purpose": "living",
+      "origin": { "x": 0.5, "y": 0.5 },
+      "width": 4.6,
+      "depth": 3.5,
+      "level": 1
+    },
+    {
+      "id": "bedroom",
+      "name": "卧室",
+      "purpose": "bedroom",
+      "origin": { "x": 5.3, "y": 0.5 },
+      "width": 3.1,
+      "depth": 3.2,
+      "level": 1
+    }
+  ],
+  "walls": [],
+  "openings": [
+    {
+      "id": "entry-door",
+      "type": "door",
+      "wallId": "entry-east",
+      "width": 1,
+      "height": 2.1,
+      "offset": 0.4
+    }
+  ],
+  "sensors": [
+    { "id": "sensor-living", "label": "客厅传感点", "x": 2.2, "y": 1.8, "temperature": 26.2 },
+    { "id": "sensor-bedroom", "label": "卧室传感点", "x": 6.5, "y": 1.8, "temperature": 25.4 },
+    { "id": "sensor-kitchen", "label": "厨房传感点", "x": 1.6, "y": 5.2, "temperature": 27.1 }
+  ],
+  "weather": {
+    "windDirection": 135,
+    "windSpeed": 3.6,
+    "outdoorTemperature": 31
+  }
+}
