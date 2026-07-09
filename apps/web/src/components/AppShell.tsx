@@ -33,9 +33,15 @@ export type AnalysisLayer = "heat" | "airflow" | "fengshui";
 
 export interface AnalysisControls {
   showHeatContours: boolean;
+  heatSliceMode: "both" | "x" | "y";
+  heatSliceX: number;
+  heatSliceY: number;
   animateAirflow: boolean;
   airflowParticleDensity: number;
   airflowParticleSpeed: number;
+  showAirDeadZones: boolean;
+  airDeadZoneThreshold: number;
+  compassMode: "simple" | "professional";
   showRoof: boolean;
   structureOpacity: number;
 }
@@ -132,9 +138,15 @@ export function AppShell() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("properties");
   const [analysisControls, setAnalysisControls] = useState<AnalysisControls>({
     showHeatContours: true,
+    heatSliceMode: "both",
+    heatSliceX: 0.5,
+    heatSliceY: 0.5,
     animateAirflow: true,
     airflowParticleDensity: 0.68,
     airflowParticleSpeed: 1.25,
+    showAirDeadZones: true,
+    airDeadZoneThreshold: 0.16,
+    compassMode: "professional",
     showRoof: true,
     structureOpacity: 0.42
   });
@@ -490,6 +502,22 @@ export function AppShell() {
                 <input type="checkbox" checked={analysisControls.showHeatContours} onChange={(event) => updateAnalysisControl("showHeatContours", event.target.checked)} />
                 <span>等温线</span>
               </label>
+              <label className="range-field">
+                <span>剖面方向</span>
+                <select value={analysisControls.heatSliceMode} onChange={(event) => updateAnalysisControl("heatSliceMode", event.target.value as AnalysisControls["heatSliceMode"])}>
+                  <option value="both">双向</option>
+                  <option value="x">横剖</option>
+                  <option value="y">纵剖</option>
+                </select>
+              </label>
+              <label className="range-field">
+                <span>横剖位置</span>
+                <input type="range" min={0.08} max={0.92} step={0.02} value={analysisControls.heatSliceX} onChange={(event) => updateAnalysisControl("heatSliceX", Number(event.target.value))} />
+              </label>
+              <label className="range-field">
+                <span>纵剖位置</span>
+                <input type="range" min={0.08} max={0.92} step={0.02} value={analysisControls.heatSliceY} onChange={(event) => updateAnalysisControl("heatSliceY", Number(event.target.value))} />
+              </label>
               <div className="legend-bar heat-legend" aria-hidden="true" />
               <div className="legend-readout">
                 <span>{simulation.heatField.min.toFixed(1)} C</span>
@@ -512,11 +540,30 @@ export function AppShell() {
                 <span>流速显示</span>
                 <input type="range" min={0.4} max={2.2} step={0.1} value={analysisControls.airflowParticleSpeed} onChange={(event) => updateAnalysisControl("airflowParticleSpeed", Number(event.target.value))} />
               </label>
+              <label className="toggle-field">
+                <input type="checkbox" checked={analysisControls.showAirDeadZones} onChange={(event) => updateAnalysisControl("showAirDeadZones", event.target.checked)} />
+                <span>死角区</span>
+              </label>
+              <label className="range-field">
+                <span>死角阈值</span>
+                <input type="range" min={0.06} max={0.32} step={0.02} value={analysisControls.airDeadZoneThreshold} onChange={(event) => updateAnalysisControl("airDeadZoneThreshold", Number(event.target.value))} />
+              </label>
               <div className="legend-bar flow-legend" aria-hidden="true" />
               <span className="legend-note">{simulation.flowField.streamlines.length} 条路径 / {simulation.flowField.seedPoints.length} 个种子</span>
             </>
           ) : null}
-          {activeAnalysis === "fengshui" ? <div className="legend-note">罗盘、九宫和房间解读共用同一层。</div> : null}
+          {activeAnalysis === "fengshui" ? (
+            <>
+              <label className="range-field">
+                <span>罗盘模式</span>
+                <select value={analysisControls.compassMode} onChange={(event) => updateAnalysisControl("compassMode", event.target.value as AnalysisControls["compassMode"])}>
+                  <option value="simple">简洁</option>
+                  <option value="professional">专业</option>
+                </select>
+              </label>
+              <div className="legend-note">简洁模式保留方向和双针；专业模式显示 24 山、八卦、九星和基准线。</div>
+            </>
+          ) : null}
           <label className="toggle-field">
             <input type="checkbox" checked={analysisControls.showRoof} onChange={(event) => updateAnalysisControl("showRoof", event.target.checked)} />
             <span>屋顶</span>

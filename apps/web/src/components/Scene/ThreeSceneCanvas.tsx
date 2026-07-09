@@ -760,7 +760,7 @@ function sampleHeatAtHeight(field: HeatField, x: number, y: number, height: numb
   return THREE.MathUtils.lerp(lower, upper, t);
 }
 
-function makeHeatSliceGeometry(layout: HouseLayout, field: HeatField, axis: "x" | "y") {
+function makeHeatSliceGeometry(layout: HouseLayout, field: HeatField, axis: "x" | "y", positionRatio: number) {
   const horizontalSegments = 48;
   const verticalSegments = 16;
   const span = Math.max(0.001, field.max - field.min);
@@ -773,8 +773,8 @@ function makeHeatSliceGeometry(layout: HouseLayout, field: HeatField, axis: "x" 
     const height = THREE.MathUtils.lerp(0.14, layout.bounds.height - 0.12, row / verticalSegments);
     for (let column = 0; column <= horizontalSegments; column += 1) {
       const ratio = column / horizontalSegments;
-      const x = axis === "x" ? layout.bounds.width * 0.5 : layout.bounds.width * ratio;
-      const y = axis === "x" ? layout.bounds.depth * ratio : layout.bounds.depth * 0.5;
+      const x = axis === "x" ? layout.bounds.width * positionRatio : layout.bounds.width * ratio;
+      const y = axis === "x" ? layout.bounds.depth * ratio : layout.bounds.depth * positionRatio;
       const temperature = sampleHeatAtHeight(field, x, y, height);
       const normalized = temperature === null ? 0 : THREE.MathUtils.clamp((temperature - field.min) / span, 0, 1);
       color.copy(colorFromRamp(normalized));
@@ -801,11 +801,29 @@ function makeHeatSliceGeometry(layout: HouseLayout, field: HeatField, axis: "x" 
   return geometry;
 }
 
-function HeatVerticalSlices({ layout, field }: { layout: HouseLayout; field: HeatField }) {
-  const geometries = useMemo(
-    () => [makeHeatSliceGeometry(layout, field, "x"), makeHeatSliceGeometry(layout, field, "y")],
-    [field, layout]
-  );
+function HeatVerticalSlices({
+  layout,
+  field,
+  mode,
+  sliceX,
+  sliceY
+}: {
+  layout: HouseLayout;
+  field: HeatField;
+  mode: AnalysisControls["heatSliceMode"];
+  sliceX: number;
+  sliceY: number;
+}) {
+  const geometries = useMemo(() => {
+    const items: THREE.BufferGeometry[] = [];
+    if (mode !== "y") {
+      items.push(makeHeatSliceGeometry(layout, field, "x", sliceX));
+    }
+    if (mode !== "x") {
+      items.push(makeHeatSliceGeometry(layout, field, "y", sliceY));
+    }
+    return items;
+  }, [field, layout, mode, sliceX, sliceY]);
 
   useEffect(() => {
     return () => {
@@ -829,13 +847,13 @@ function HeatFieldOverlay({
   field,
   sensors,
   visible,
-  showContours
+  controls
 }: {
   layout: HouseLayout;
   field: HeatField;
   sensors: SensorPoint[];
   visible: boolean;
-  showContours: boolean;
+  controls: AnalysisControls;
 }) {
   const temperatureLayers = useMemo(() => (field.layers.length > 0 ? field.layers : [field.temperature]), [field]);
   const renderLayers = useMemo(
@@ -870,9 +888,9 @@ function HeatFieldOverlay({
         uTime: { value: 0 },
         uAlpha: { value: layer.alpha },
         uContourStrength: { value: layer.contourStrength },
-        uContours: { value: showContours }
+        uContours: { value: controls.showHeatContours }
       })),
-    [field.max, field.min, maskTexture, renderLayers, showContours, temperatureTextures]
+    [controls.showHeatContours, field.max, field.min, maskTexture, renderLayers, temperatureTextures]
   );
 
   useFrame(({ clock }) => {
@@ -914,7 +932,13 @@ function HeatFieldOverlay({
         </mesh>
       ))}
       <HeatPlumes layout={layout} field={field} />
-      <HeatVerticalSlices layout={layout} field={field} />
+      <HeatVerticalSlices
+        layout={layout}
+        field={field}
+        mode={controls.heatSliceMode}
+        sliceX={controls.heatSliceX}
+        sliceY={controls.heatSliceY}
+      />
       {sensors.map((sensor) => (
         <group key={sensor.id} position={[sceneX(layout, sensor.x), 0.42, sceneZ(layout, sensor.y)]}>
           <mesh>
@@ -1328,6 +1352,83 @@ function AirflowGlyphLayer({
   );
 }
 
+function makeAirDeadZoneGeometry(layout: HouseLayout, field: FlowField, threshold: number) {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  const color = new THREE.Color("#ffcf5a");
+  const lowColor = new THREE.Color("#ff6b46");
+  let vertexOffset = 0;
+
+  for (let row = 0; row < field.grid.rows; row += 1) {
+    for (let column = 0; column < field.grid.cols; column += 1) {
+      const index = row * field.grid.cols + column;
+      if (!field.grid.interior[index]) {
+        continue;
+      }
+      const speedNorm = Math.hypot(field.vx[index], field.vy[index]) / Math.max(0.001, field.speedMax);
+      if (speedNorm > threshold) {
+        continue;
+      }
+
+      const x0 = field.grid.originX + column * field.grid.cellSize;
+      const x1 = x0 + field.grid.cellSize;
+      const y0 = field.grid.originY + row * field.grid.cellSize;
+      const y1 = y0 + field.grid.cellSize;
+      const severity = THREE.MathUtils.clamp(1 - speedNorm / Math.max(0.001, threshold), 0, 1);
+      color.copy(new THREE.Color("#ffcf5a")).lerp(lowColor, severity);
+
+      positions.push(
+        sceneX(layout, x0),
+        0.135,
+        sceneZ(layout, y0),
+        sceneX(layout, x1),
+        0.135,
+        sceneZ(layout, y0),
+        sceneX(layout, x1),
+        0.135,
+        sceneZ(layout, y1),
+        sceneX(layout, x0),
+        0.135,
+        sceneZ(layout, y1)
+      );
+      colors.push(color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b);
+      indices.push(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset, vertexOffset + 2, vertexOffset + 3);
+      vertexOffset += 4;
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  return geometry;
+}
+
+function AirDeadZoneLayer({
+  layout,
+  field,
+  threshold
+}: {
+  layout: HouseLayout;
+  field: FlowField;
+  threshold: number;
+}) {
+  const geometry = useMemo(() => makeAirDeadZoneGeometry(layout, field, threshold), [field, layout, threshold]);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
+  return (
+    <mesh geometry={geometry} raycast={noRaycast} renderOrder={2}>
+      <meshBasicMaterial vertexColors transparent opacity={0.26} depthWrite={false} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
 function AirflowFieldOverlay({
   layout,
   field,
@@ -1347,6 +1448,9 @@ function AirflowFieldOverlay({
 
   return (
     <>
+      {controls.showAirDeadZones ? (
+        <AirDeadZoneLayer layout={layout} field={field} threshold={controls.airDeadZoneThreshold} />
+      ) : null}
       <AirflowGlyphLayer layout={layout} field={field} selectedRoomId={selectedRoomId} />
       <AirflowParticles
         layout={layout}
@@ -1750,11 +1854,13 @@ function CompassNeedle({
 function CompassRing({
   layout,
   fengshui,
-  visible
+  visible,
+  mode
 }: {
   layout: HouseLayout;
   fengshui: FengshuiAnalysis;
   visible: boolean;
+  mode: AnalysisControls["compassMode"];
 }) {
   const yinYangTexture = useMemo(() => makeYinYangTexture(), []);
 
@@ -1783,17 +1889,19 @@ function CompassRing({
         <meshBasicMaterial color="#d9aa25" transparent opacity={0.18} depthWrite={false} />
       </mesh>
 
-      {fengshui.compass.map((sector, index) => (
-        <CompassSectorBand
-          key={`band-${sector.id}`}
-          innerRadius={sectorInnerRadius}
-          outerRadius={sectorOuterRadius}
-          startAngle={(index / 8) * Math.PI * 2 - Math.PI / 2 - sectorSpan / 2}
-          span={sectorSpan}
-          active={sector.active}
-          index={index}
-        />
-      ))}
+      {mode === "professional"
+        ? fengshui.compass.map((sector, index) => (
+            <CompassSectorBand
+              key={`band-${sector.id}`}
+              innerRadius={sectorInnerRadius}
+              outerRadius={sectorOuterRadius}
+              startAngle={(index / 8) * Math.PI * 2 - Math.PI / 2 - sectorSpan / 2}
+              span={sectorSpan}
+              active={sector.active}
+              index={index}
+            />
+          ))
+        : null}
 
       {[radius, innerRadius, midRadius, radius - 1.08, radius - 1.42].map((ringRadius, index) => (
         <mesh key={ringRadius} rotation={[-Math.PI / 2, 0, 0]}>
@@ -1802,14 +1910,16 @@ function CompassRing({
         </mesh>
       ))}
 
-      {[0, Math.PI / 2].map((rotation, index) => (
-        <group key={`compass-cross-${index}`} rotation={[0, rotation, 0]}>
-          <mesh position={[0, 0.052, 0]} raycast={noRaycast}>
-            <boxGeometry args={[radius * 2.02, 0.018, 0.018]} />
-            <meshBasicMaterial color={index === 0 ? "#c62121" : "#202820"} transparent opacity={index === 0 ? 0.52 : 0.28} depthWrite={false} />
-          </mesh>
-        </group>
-      ))}
+      {mode === "professional"
+        ? [0, Math.PI / 2].map((rotation, index) => (
+            <group key={`compass-cross-${index}`} rotation={[0, rotation, 0]}>
+              <mesh position={[0, 0.052, 0]} raycast={noRaycast}>
+                <boxGeometry args={[radius * 2.02, 0.018, 0.018]} />
+                <meshBasicMaterial color={index === 0 ? "#c62121" : "#202820"} transparent opacity={index === 0 ? 0.52 : 0.28} depthWrite={false} />
+              </mesh>
+            </group>
+          ))
+        : null}
 
       {Array.from({ length: 72 }, (_, index) => {
         const angle = (index / 72) * Math.PI * 2 - Math.PI / 2;
@@ -1824,37 +1934,41 @@ function CompassRing({
         );
       })}
 
-      {compassMountains.map((label, index) => {
-        const angle = (index / compassMountains.length) * Math.PI * 2 - Math.PI / 2;
-        const x = Math.cos(angle);
-        const z = Math.sin(angle);
-        return (
-          <LabelSprite
-            key={label}
-            text={label}
-            position={[x * (radius - 0.52), 0.32, z * (radius - 0.52)]}
-            accent={index % 3 === 0 ? "#101820" : "#5b4212"}
-            boxed={false}
-            scale={[0.38, 0.14, 1]}
-          />
-        );
-      })}
+      {mode === "professional"
+        ? compassMountains.map((label, index) => {
+            const angle = (index / compassMountains.length) * Math.PI * 2 - Math.PI / 2;
+            const x = Math.cos(angle);
+            const z = Math.sin(angle);
+            return (
+              <LabelSprite
+                key={label}
+                text={label}
+                position={[x * (radius - 0.52), 0.32, z * (radius - 0.52)]}
+                accent={index % 3 === 0 ? "#101820" : "#5b4212"}
+                boxed={false}
+                scale={[0.38, 0.14, 1]}
+              />
+            );
+          })
+        : null}
 
-      {compassTrigrams.map((item, index) => {
-        const angle = (index / compassTrigrams.length) * Math.PI * 2 - Math.PI / 2;
-        const x = Math.cos(angle);
-        const z = Math.sin(angle);
-        return (
-          <LabelSprite
-            key={`${item.trigram}-${item.star}`}
-            text={`${item.trigram}${item.star}`}
-            position={[x * (radius - 1.22), 0.34, z * (radius - 1.22)]}
-            accent={item.tone}
-            boxed={false}
-            scale={[0.62, 0.2, 1]}
-          />
-        );
-      })}
+      {mode === "professional"
+        ? compassTrigrams.map((item, index) => {
+            const angle = (index / compassTrigrams.length) * Math.PI * 2 - Math.PI / 2;
+            const x = Math.cos(angle);
+            const z = Math.sin(angle);
+            return (
+              <LabelSprite
+                key={`${item.trigram}-${item.star}`}
+                text={`${item.trigram}${item.star}`}
+                position={[x * (radius - 1.22), 0.34, z * (radius - 1.22)]}
+                accent={item.tone}
+                boxed={false}
+                scale={[0.62, 0.2, 1]}
+              />
+            );
+          })
+        : null}
 
       {fengshui.compass.map((sector, index) => {
         const angle = (index / 8) * Math.PI * 2 - Math.PI / 2;
@@ -1963,7 +2077,7 @@ export function ThreeSceneCanvas({
         <meshStandardMaterial color="#17212b" roughness={0.8} />
       </mesh>
 
-      <CompassRing layout={layout} fengshui={fengshui} visible={layers.fengshui} />
+      <CompassRing layout={layout} fengshui={fengshui} visible={layers.fengshui} mode={controls.compassMode} />
       <BaguaOverlay layout={layout} fengshui={fengshui} activePalace={activePalace} visible={layers.fengshui} />
       <RoomMeshes layout={layout} selectedRoomId={selectedRoomId} onSelectRoom={onSelectRoom} />
       <HeatFieldOverlay
@@ -1971,7 +2085,7 @@ export function ThreeSceneCanvas({
         field={heatField}
         sensors={layout.sensors}
         visible={layers.heat}
-        showContours={controls.showHeatContours}
+        controls={controls}
       />
       <AirflowFieldOverlay
         layout={layout}
