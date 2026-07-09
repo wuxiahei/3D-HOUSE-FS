@@ -118,8 +118,8 @@ export function summarizeFlowField(layout: HouseLayout, field: FlowField): RoomF
 }
 
 export function generateSimulation(layout: HouseLayout): SimulationResult {
-  const heatField = solveHeat(layout);
   const flowField = solveFlow(layout);
+  const heatField = solveHeat(layout, { airflow: flowField });
   return {
     heatField,
     flowField,

@@ -842,6 +842,160 @@ function HeatVerticalSlices({
   );
 }
 
+function makeHeatContourGeometry(layout: HouseLayout, field: HeatField) {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const contourCount = 10;
+  const span = Math.max(0.001, field.max - field.min);
+  const color = new THREE.Color();
+
+  function pointOnEdge(
+    a: { x: number; y: number; value: number },
+    b: { x: number; y: number; value: number },
+    level: number
+  ) {
+    const t = THREE.MathUtils.clamp((level - a.value) / Math.max(0.0001, b.value - a.value), 0, 1);
+    return {
+      x: THREE.MathUtils.lerp(a.x, b.x, t),
+      y: THREE.MathUtils.lerp(a.y, b.y, t)
+    };
+  }
+
+  for (let levelIndex = 1; levelIndex < contourCount; levelIndex += 1) {
+    const level = field.min + (span * levelIndex) / contourCount;
+    const normalized = (level - field.min) / span;
+    color.copy(colorFromRamp(normalized)).lerp(new THREE.Color("#ffffff"), 0.28);
+
+    for (let row = 0; row < field.grid.rows - 1; row += 1) {
+      for (let column = 0; column < field.grid.cols - 1; column += 1) {
+        const i00 = row * field.grid.cols + column;
+        const i10 = row * field.grid.cols + column + 1;
+        const i11 = (row + 1) * field.grid.cols + column + 1;
+        const i01 = (row + 1) * field.grid.cols + column;
+        if (!field.grid.interior[i00] && !field.grid.interior[i10] && !field.grid.interior[i11] && !field.grid.interior[i01]) {
+          continue;
+        }
+
+        const x0 = field.grid.originX + column * field.grid.cellSize;
+        const x1 = x0 + field.grid.cellSize;
+        const y0 = field.grid.originY + row * field.grid.cellSize;
+        const y1 = y0 + field.grid.cellSize;
+        const corners = [
+          { x: x0, y: y0, value: field.temperature[i00] },
+          { x: x1, y: y0, value: field.temperature[i10] },
+          { x: x1, y: y1, value: field.temperature[i11] },
+          { x: x0, y: y1, value: field.temperature[i01] }
+        ];
+        const edges: [number, number][] = [
+          [0, 1],
+          [1, 2],
+          [2, 3],
+          [3, 0]
+        ];
+        const hits = edges
+          .filter(([a, b]) => (corners[a].value - level) * (corners[b].value - level) <= 0 && corners[a].value !== corners[b].value)
+          .map(([a, b]) => pointOnEdge(corners[a], corners[b], level));
+
+        for (let hitIndex = 0; hitIndex + 1 < hits.length; hitIndex += 2) {
+          positions.push(
+            sceneX(layout, hits[hitIndex].x),
+            0.182 + levelIndex * 0.002,
+            sceneZ(layout, hits[hitIndex].y),
+            sceneX(layout, hits[hitIndex + 1].x),
+            0.182 + levelIndex * 0.002,
+            sceneZ(layout, hits[hitIndex + 1].y)
+          );
+          colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+        }
+      }
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  return geometry;
+}
+
+function HeatContourLayer({ layout, field }: { layout: HouseLayout; field: HeatField }) {
+  const geometry = useMemo(() => makeHeatContourGeometry(layout, field), [field, layout]);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
+  return (
+    <lineSegments geometry={geometry} raycast={noRaycast} renderOrder={6}>
+      <lineBasicMaterial vertexColors transparent opacity={0.72} depthWrite={false} />
+    </lineSegments>
+  );
+}
+
+function makeHeatFluxGeometry(layout: HouseLayout, field: HeatField) {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const stride = Math.max(2, Math.round(Math.max(field.grid.cols, field.grid.rows) / 26));
+  const color = new THREE.Color("#fff0a8");
+
+  for (let row = 1; row < field.grid.rows - 1; row += stride) {
+    for (let column = 1; column < field.grid.cols - 1; column += stride) {
+      const index = row * field.grid.cols + column;
+      if (!field.grid.interior[index]) {
+        continue;
+      }
+      const east = row * field.grid.cols + column + 1;
+      const west = row * field.grid.cols + column - 1;
+      const south = (row + 1) * field.grid.cols + column;
+      const north = (row - 1) * field.grid.cols + column;
+      const gx = (field.temperature[east] - field.temperature[west]) / Math.max(0.001, field.grid.cellSize * 2);
+      const gy = (field.temperature[south] - field.temperature[north]) / Math.max(0.001, field.grid.cellSize * 2);
+      const magnitude = Math.hypot(gx, gy);
+      if (magnitude < 0.015) {
+        continue;
+      }
+      const ux = -gx / magnitude;
+      const uy = -gy / magnitude;
+      const centerX = field.grid.originX + (column + 0.5) * field.grid.cellSize;
+      const centerY = field.grid.originY + (row + 0.5) * field.grid.cellSize;
+      const length = THREE.MathUtils.clamp(magnitude * 0.22, field.grid.cellSize * 0.5, field.grid.cellSize * stride * 0.82);
+      const y = 0.255;
+
+      positions.push(
+        sceneX(layout, centerX - ux * length * 0.45),
+        y,
+        sceneZ(layout, centerY - uy * length * 0.45),
+        sceneX(layout, centerX + ux * length * 0.55),
+        y,
+        sceneZ(layout, centerY + uy * length * 0.55)
+      );
+      colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  return geometry;
+}
+
+function HeatFluxLayer({ layout, field }: { layout: HouseLayout; field: HeatField }) {
+  const geometry = useMemo(() => makeHeatFluxGeometry(layout, field), [field, layout]);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
+  return (
+    <lineSegments geometry={geometry} raycast={noRaycast} renderOrder={7}>
+      <lineBasicMaterial vertexColors transparent opacity={0.64} depthWrite={false} />
+    </lineSegments>
+  );
+}
+
 function HeatFieldOverlay({
   layout,
   field,
@@ -939,6 +1093,8 @@ function HeatFieldOverlay({
         sliceX={controls.heatSliceX}
         sliceY={controls.heatSliceY}
       />
+      <HeatContourLayer layout={layout} field={field} />
+      <HeatFluxLayer layout={layout} field={field} />
       {sensors.map((sensor) => (
         <group key={sensor.id} position={[sceneX(layout, sensor.x), 0.42, sceneZ(layout, sensor.y)]}>
           <mesh>
@@ -1352,6 +1508,145 @@ function AirflowGlyphLayer({
   );
 }
 
+function makeAirPressureGeometry(layout: HouseLayout, field: FlowField) {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  const cold = new THREE.Color("#2367ff");
+  const neutral = new THREE.Color("#d7fff7");
+  const warm = new THREE.Color("#ffb14a");
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  let vertexOffset = 0;
+
+  for (let index = 0; index < field.pressure.length; index += 1) {
+    if (!field.grid.interior[index]) {
+      continue;
+    }
+    min = Math.min(min, field.pressure[index]);
+    max = Math.max(max, field.pressure[index]);
+  }
+  const span = Math.max(0.001, max - min);
+
+  for (let row = 0; row < field.grid.rows; row += 1) {
+    for (let column = 0; column < field.grid.cols; column += 1) {
+      const index = row * field.grid.cols + column;
+      if (!field.grid.interior[index]) {
+        continue;
+      }
+      const x0 = field.grid.originX + column * field.grid.cellSize;
+      const x1 = x0 + field.grid.cellSize;
+      const y0 = field.grid.originY + row * field.grid.cellSize;
+      const y1 = y0 + field.grid.cellSize;
+      const normalized = THREE.MathUtils.clamp((field.pressure[index] - min) / span, 0, 1);
+      const color = normalized < 0.5 ? cold.clone().lerp(neutral, normalized / 0.5) : neutral.clone().lerp(warm, (normalized - 0.5) / 0.5);
+
+      positions.push(
+        sceneX(layout, x0),
+        0.122,
+        sceneZ(layout, y0),
+        sceneX(layout, x1),
+        0.122,
+        sceneZ(layout, y0),
+        sceneX(layout, x1),
+        0.122,
+        sceneZ(layout, y1),
+        sceneX(layout, x0),
+        0.122,
+        sceneZ(layout, y1)
+      );
+      colors.push(color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b);
+      indices.push(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset, vertexOffset + 2, vertexOffset + 3);
+      vertexOffset += 4;
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  return geometry;
+}
+
+function AirPressureLayer({ layout, field }: { layout: HouseLayout; field: FlowField }) {
+  const geometry = useMemo(() => makeAirPressureGeometry(layout, field), [field, layout]);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
+  return (
+    <mesh geometry={geometry} raycast={noRaycast} renderOrder={1}>
+      <meshBasicMaterial vertexColors transparent opacity={0.18} depthWrite={false} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
+function makeAirPathlineGeometry(layout: HouseLayout, field: FlowField, selectedRoomId: string | null) {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const color = new THREE.Color();
+  const seeds = field.seedPoints.slice(0, 180);
+
+  for (const seed of seeds) {
+    let x = seed.x;
+    let y = seed.y;
+    for (let step = 0; step < 28; step += 1) {
+      const velocity = sampleFlowField(field, x, y);
+      const speed = velocity.speed;
+      const speedNorm = Math.min(1, speed / Math.max(0.001, field.speedMax));
+      if (speed < field.speedMax * 0.006) {
+        break;
+      }
+      const stepLength = field.grid.cellSize * (0.42 + speedNorm * 0.32);
+      const nextX = x + (velocity.x / Math.max(0.0001, speed)) * stepLength;
+      const nextY = y + (velocity.y / Math.max(0.0001, speed)) * stepLength;
+      if (!cellAt(field, nextX, nextY)) {
+        break;
+      }
+      const roomId = pointRoomId(layout, x, y);
+      const dim = selectedRoomId && roomId !== selectedRoomId ? 0.36 : 1;
+      color.copy(colorFromRamp(0.22 + speedNorm * 0.68)).multiplyScalar(dim);
+      const height = THREE.MathUtils.clamp(0.34 + speedNorm * 0.42 + velocity.w * 0.9, 0.24, layout.bounds.height - 0.18);
+      positions.push(sceneX(layout, x), height, sceneZ(layout, y), sceneX(layout, nextX), height, sceneZ(layout, nextY));
+      colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+      x = nextX;
+      y = nextY;
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  return geometry;
+}
+
+function AirPathlineLayer({
+  layout,
+  field,
+  selectedRoomId
+}: {
+  layout: HouseLayout;
+  field: FlowField;
+  selectedRoomId: string | null;
+}) {
+  const geometry = useMemo(() => makeAirPathlineGeometry(layout, field, selectedRoomId), [field, layout, selectedRoomId]);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
+  return (
+    <lineSegments geometry={geometry} raycast={noRaycast} renderOrder={5}>
+      <lineBasicMaterial vertexColors transparent opacity={0.72} depthWrite={false} />
+    </lineSegments>
+  );
+}
+
 function makeAirDeadZoneGeometry(layout: HouseLayout, field: FlowField, threshold: number) {
   const positions: number[] = [];
   const colors: number[] = [];
@@ -1448,9 +1743,11 @@ function AirflowFieldOverlay({
 
   return (
     <>
+      <AirPressureLayer layout={layout} field={field} />
       {controls.showAirDeadZones ? (
         <AirDeadZoneLayer layout={layout} field={field} threshold={controls.airDeadZoneThreshold} />
       ) : null}
+      <AirPathlineLayer layout={layout} field={field} selectedRoomId={selectedRoomId} />
       <AirflowGlyphLayer layout={layout} field={field} selectedRoomId={selectedRoomId} />
       <AirflowParticles
         layout={layout}

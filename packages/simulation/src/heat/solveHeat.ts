@@ -1,10 +1,11 @@
 import type { ClimateDevice, HouseLayout, SensorPoint } from "@fengshui/core";
 import { rasterizeLayout, cellCenter } from "../grid/rasterize";
-import type { HeatField, SimGrid } from "../types";
+import type { FlowField, HeatField, SimGrid } from "../types";
 
 interface HeatSolveOptions {
   iterations?: number;
   epsilon?: number;
+  airflow?: Pick<FlowField, "grid" | "vx" | "vy" | "speedMax">;
 }
 
 const HEAT_LAYER_HEIGHTS = [0.08, 0.28, 0.5, 0.72, 0.92];
@@ -188,6 +189,45 @@ function resetConstraints(temperature: Float32Array, constraints: ReturnType<typ
   }
 }
 
+function matchingFlow(grid: SimGrid, airflow: HeatSolveOptions["airflow"] | undefined) {
+  return airflow &&
+    airflow.grid.cols === grid.cols &&
+    airflow.grid.rows === grid.rows &&
+    Math.abs(airflow.grid.cellSize - grid.cellSize) < 0.0001
+    ? airflow
+    : null;
+}
+
+function airflowHeatExchange(
+  layout: HouseLayout,
+  grid: SimGrid,
+  flow: Pick<FlowField, "grid" | "vx" | "vy" | "speedMax"> | null,
+  temperature: Float32Array,
+  column: number,
+  row: number,
+  index: number
+) {
+  if (!flow) {
+    return 0;
+  }
+
+  const vx = flow.vx[index] ?? 0;
+  const vy = flow.vy[index] ?? 0;
+  const speedNorm = Math.min(1, Math.hypot(vx, vy) / Math.max(0.001, flow.speedMax));
+  if (speedNorm <= 0.002) {
+    return 0;
+  }
+
+  const upwindColumn = Math.min(grid.cols - 1, Math.max(0, column - Math.sign(vx)));
+  const upwindRow = Math.min(grid.rows - 1, Math.max(0, row - Math.sign(vy)));
+  const upwind = gridIndex(grid, upwindColumn, upwindRow);
+  const upwindTemperature = grid.interior[upwind] ? temperature[upwind] : layout.weather.outdoorTemperature;
+  const advectiveMix = (upwindTemperature - temperature[index]) * speedNorm * 0.22;
+  const outdoorExchange = (layout.weather.outdoorTemperature - temperature[index]) * speedNorm * 0.035;
+
+  return advectiveMix + outdoorExchange;
+}
+
 export function solveHeat(layout: HouseLayout, options: HeatSolveOptions = {}): HeatField {
   const grid = rasterizeLayout(layout);
   const constraints = sensorConstraints(grid, layout.sensors);
@@ -197,6 +237,7 @@ export function solveHeat(layout: HouseLayout, options: HeatSolveOptions = {}): 
   const iterations = options.iterations ?? 160;
   const epsilon = options.epsilon ?? 0.006;
   const outdoor = layout.weather.outdoorTemperature;
+  const flow = matchingFlow(grid, options.airflow);
 
   for (let iteration = 0; iteration < iterations; iteration += 1) {
     let deltaMax = 0;
@@ -247,7 +288,10 @@ export function solveHeat(layout: HouseLayout, options: HeatSolveOptions = {}): 
           continue;
         }
 
-        const target = weighted / totalWeight + sources[index];
+        const target =
+          weighted / totalWeight +
+          sources[index] +
+          airflowHeatExchange(layout, grid, flow, current, column, row, index);
         const relaxed = current[index] + (target - current[index]) * 0.72;
         deltaMax = Math.max(deltaMax, Math.abs(relaxed - current[index]));
         next[index] = relaxed;
