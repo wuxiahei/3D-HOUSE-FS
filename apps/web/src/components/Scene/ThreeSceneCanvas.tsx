@@ -1529,6 +1529,76 @@ const compassMountains = [
   "壬"
 ];
 
+function CompassSectorBand({
+  innerRadius,
+  outerRadius,
+  startAngle,
+  span,
+  active,
+  index
+}: {
+  innerRadius: number;
+  outerRadius: number;
+  startAngle: number;
+  span: number;
+  active: boolean;
+  index: number;
+}) {
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, active ? 0.022 : 0.006, 0]} raycast={noRaycast}>
+      <ringGeometry args={[innerRadius, outerRadius, 36, 1, startAngle, span]} />
+      <meshBasicMaterial
+        color={active ? "#ffcf5a" : index % 2 === 0 ? "#f0c75a" : "#f8e2a0"}
+        transparent
+        opacity={active ? 0.28 : 0.08}
+        depthWrite={false}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
+function CompassNeedle({
+  radius,
+  degrees,
+  color,
+  emissive,
+  y,
+  lengthRatio,
+  width,
+  label,
+  labelOffset = 0.12
+}: {
+  radius: number;
+  degrees: number;
+  color: string;
+  emissive: string;
+  y: number;
+  lengthRatio: number;
+  width: number;
+  label: string;
+  labelOffset?: number;
+}) {
+  const labelRadius = radius * lengthRatio + labelOffset;
+  return (
+    <group rotation={[0, -THREE.MathUtils.degToRad(degrees), 0]}>
+      <mesh position={[radius * lengthRatio * 0.5, y, 0]} raycast={noRaycast}>
+        <boxGeometry args={[radius * lengthRatio, width, width]} />
+        <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.24} roughness={0.38} />
+      </mesh>
+      <mesh position={[radius * lengthRatio, y, 0]} rotation={[0, 0, -Math.PI / 2]} raycast={noRaycast}>
+        <coneGeometry args={[width * 2.6, width * 6.2, 24]} />
+        <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={0.28} roughness={0.34} />
+      </mesh>
+      <mesh position={[-radius * lengthRatio * 0.28, y - 0.006, 0]} raycast={noRaycast}>
+        <boxGeometry args={[radius * lengthRatio * 0.42, width * 0.72, width * 0.72]} />
+        <meshStandardMaterial color="#eef4ef" emissive="#ffffff" emissiveIntensity={0.06} roughness={0.42} />
+      </mesh>
+      <LabelSprite text={label} position={[labelRadius, y + 0.2, 0]} accent={color} boxed={false} scale={[0.9, 0.28, 1]} />
+    </group>
+  );
+}
+
 function CompassRing({
   layout,
   fengshui,
@@ -1554,6 +1624,9 @@ function CompassRing({
   const innerRadius = radius - 0.34;
   const midRadius = radius - 0.72;
   const tickRadius = radius - 0.16;
+  const sectorInnerRadius = radius - 1.42;
+  const sectorOuterRadius = radius - 0.08;
+  const sectorSpan = (Math.PI * 2) / 8 - 0.035;
 
   return (
     <group position={[0, 0.2, 0]}>
@@ -1561,6 +1634,18 @@ function CompassRing({
         <circleGeometry args={[radius + 0.24, 160]} />
         <meshBasicMaterial color="#d9aa25" transparent opacity={0.18} depthWrite={false} />
       </mesh>
+
+      {fengshui.compass.map((sector, index) => (
+        <CompassSectorBand
+          key={`band-${sector.id}`}
+          innerRadius={sectorInnerRadius}
+          outerRadius={sectorOuterRadius}
+          startAngle={(index / 8) * Math.PI * 2 - Math.PI / 2 - sectorSpan / 2}
+          span={sectorSpan}
+          active={sector.active}
+          index={index}
+        />
+      ))}
 
       {[radius, innerRadius, midRadius, radius - 1.08, radius - 1.42].map((ringRadius, index) => (
         <mesh key={ringRadius} rotation={[-Math.PI / 2, 0, 0]}>
@@ -1620,51 +1705,42 @@ function CompassRing({
         );
       })}
 
-      <group rotation={[0, -THREE.MathUtils.degToRad(layout.orientation.facingDegrees), 0]}>
-        <mesh position={[radius * 0.42, 0.09, 0]}>
-          <boxGeometry args={[radius * 0.82, 0.055, 0.055]} />
-          <meshStandardMaterial color="#ff4d2e" emissive="#8b1200" emissiveIntensity={0.2} />
-        </mesh>
-        <mesh position={[radius * 0.86, 0.09, 0]} rotation={[0, 0, -Math.PI / 2]}>
-          <coneGeometry args={[0.14, 0.38, 18]} />
-          <meshStandardMaterial color="#ff4d2e" emissive="#8b1200" emissiveIntensity={0.2} />
-        </mesh>
-      </group>
+      <CompassNeedle
+        radius={radius}
+        degrees={layout.orientation.facingDegrees}
+        color="#ff5f46"
+        emissive="#8b1200"
+        y={0.24}
+        lengthRatio={0.78}
+        width={0.075}
+        label={`朝向 ${formatDirectionLabel(layout.orientation.facingLabel)}`}
+      />
+      <CompassNeedle
+        radius={radius}
+        degrees={layout.orientation.frontDoorDegrees}
+        color="#28d7a7"
+        emissive="#0d6960"
+        y={0.15}
+        lengthRatio={0.58}
+        width={0.046}
+        label={`门向 ${formatDirectionLabel(layout.orientation.frontDoorLabel)}`}
+        labelOffset={0.34}
+      />
 
-      <group rotation={[0, -THREE.MathUtils.degToRad(layout.orientation.facingDegrees), 0]}>
-        <mesh position={[radius * 0.36, 0.2, 0]}>
-          <boxGeometry args={[radius * 0.72, 0.08, 0.08]} />
-          <meshStandardMaterial color="#ff7a22" emissive="#a82400" emissiveIntensity={0.22} />
-        </mesh>
-        <mesh position={[-radius * 0.28, 0.19, 0]}>
-          <boxGeometry args={[radius * 0.55, 0.07, 0.07]} />
-          <meshStandardMaterial color="#f3f4f0" emissive="#ffffff" emissiveIntensity={0.08} />
-        </mesh>
-        <mesh position={[radius * 0.78, 0.2, 0]} rotation={[0, 0, -Math.PI / 2]}>
-          <coneGeometry args={[0.2, 0.48, 24]} />
-          <meshStandardMaterial color="#ff4d2e" emissive="#8b1200" emissiveIntensity={0.25} />
-        </mesh>
-        <mesh position={[0, 0.24, 0]}>
-          <sphereGeometry args={[0.18, 24, 24]} />
-          <meshStandardMaterial color="#d7d9d2" metalness={0.6} roughness={0.22} />
-        </mesh>
-      </group>
-
-      <group rotation={[0, -THREE.MathUtils.degToRad(layout.orientation.frontDoorDegrees), 0]}>
-        <mesh position={[radius * 0.31, 0.13, 0]}>
-          <boxGeometry args={[radius * 0.62, 0.035, 0.035]} />
-          <meshStandardMaterial color="#28d7a7" emissive="#0d6960" emissiveIntensity={0.12} />
-        </mesh>
-      </group>
+      <mesh position={[0, 0.245, 0]} raycast={noRaycast}>
+        <cylinderGeometry args={[0.34, 0.4, 0.08, 48]} />
+        <meshStandardMaterial color="#e6e7dc" metalness={0.45} roughness={0.25} emissive="#ffffff" emissiveIntensity={0.06} />
+      </mesh>
 
       <sprite position={[0, 0.28, 0]} scale={[1.35, 1.35, 1]}>
         <spriteMaterial map={yinYangTexture} transparent depthWrite={false} />
       </sprite>
 
       <LabelSprite
-        text={`向${formatDirectionLabel(layout.orientation.facingLabel)} 门${formatDirectionLabel(layout.orientation.frontDoorLabel)}`}
-        position={[0, 0.45, 0]}
+        text={`${layout.orientation.facingDegrees}度 / 门${layout.orientation.frontDoorDegrees}度`}
+        position={[0, 0.58, 0]}
         accent="#19c2ff"
+        scale={[1.52, 0.48, 1]}
       />
     </group>
   );
