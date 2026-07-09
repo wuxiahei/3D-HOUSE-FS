@@ -36,6 +36,8 @@ export interface AnalysisControls {
   animateAirflow: boolean;
   airflowParticleDensity: number;
   airflowParticleSpeed: number;
+  showRoof: boolean;
+  structureOpacity: number;
 }
 
 type InspectorTab = "properties" | "files" | "templates";
@@ -131,8 +133,10 @@ export function AppShell() {
   const [analysisControls, setAnalysisControls] = useState<AnalysisControls>({
     showHeatContours: true,
     animateAirflow: true,
-    airflowParticleDensity: 0.58,
-    airflowParticleSpeed: 1.25
+    airflowParticleDensity: 0.68,
+    airflowParticleSpeed: 1.25,
+    showRoof: true,
+    structureOpacity: 0.42
   });
   const [layers, setLayers] = useState<SceneLayers>({
     heat: true,
@@ -146,7 +150,6 @@ export function AppShell() {
   const heatmap = simulation.heatmap;
   const airflow = simulation.airflow;
   const fengshui = useMemo(() => analyzeFengshui(layout), [layout]);
-
   const selectedRoom = layout.rooms.find((room) => room.id === selectedRoomId) ?? null;
   const activePalace = selectedRoom
     ? fengshui.roomPalaceMap.find((item) => item.roomId === selectedRoom.id)?.palace ?? null
@@ -171,33 +174,18 @@ export function AppShell() {
   }
 
   function updateMetadata(key: keyof HouseLayout["metadata"], value: string | number) {
-    setLayout((current) => ({
-      ...current,
-      metadata: {
-        ...current.metadata,
-        [key]: value
-      }
-    }));
+    setLayout((current) => ({ ...current, metadata: { ...current.metadata, [key]: value } }));
   }
 
   function updateWeather(key: keyof HouseLayout["weather"], value: number) {
-    setLayout((current) => ({
-      ...current,
-      weather: {
-        ...current.weather,
-        [key]: value
-      }
-    }));
+    setLayout((current) => ({ ...current, weather: { ...current.weather, [key]: value } }));
   }
 
   function updateOrientation(key: "facingDegrees" | "frontDoorDegrees", value: number) {
     setLayout((current) =>
       syncDerivedLayoutData({
         ...current,
-        orientation: {
-          ...current.orientation,
-          [key]: value
-        }
+        orientation: { ...current.orientation, [key]: value }
       })
     );
   }
@@ -207,12 +195,7 @@ export function AppShell() {
       syncDerivedLayoutData({
         ...current,
         rooms: current.rooms.map((room) =>
-          room.id === roomId
-            ? {
-                ...room,
-                [key]: Math.max(0.4, Number(value.toFixed(2)))
-              }
-            : room
+          room.id === roomId ? { ...room, [key]: Math.max(0.4, Number(value.toFixed(2))) } : room
         )
       })
     );
@@ -224,13 +207,7 @@ export function AppShell() {
         ...current,
         rooms: current.rooms.map((room) =>
           room.id === roomId
-            ? {
-                ...room,
-                origin: {
-                  ...room.origin,
-                  [axis]: Number(Math.max(0, value).toFixed(2))
-                }
-              }
+            ? { ...room, origin: { ...room.origin, [axis]: Number(Math.max(0, value).toFixed(2)) } }
             : room
         )
       })
@@ -242,13 +219,7 @@ export function AppShell() {
       const next = cloneLayout(current);
       next.rooms = next.rooms.map((room) =>
         room.id === roomId
-          ? {
-              ...room,
-              origin: {
-                ...room.origin,
-                [axis]: Number(Math.max(0, room.origin[axis] + delta).toFixed(2))
-              }
-            }
+          ? { ...room, origin: { ...room.origin, [axis]: Number(Math.max(0, room.origin[axis] + delta).toFixed(2)) } }
           : room
       );
       return syncDerivedLayoutData(next);
@@ -265,10 +236,7 @@ export function AppShell() {
         y: Number((current.bounds.depth / 2).toFixed(2)),
         temperature: Number((current.weather.outdoorTemperature - 4).toFixed(1))
       };
-      return {
-        ...current,
-        sensors: [...current.sensors, sensor]
-      };
+      return { ...current, sensors: [...current.sensors, sensor] };
     });
   }
 
@@ -280,18 +248,9 @@ export function AppShell() {
           ? {
               ...sensor,
               ...patch,
-              x:
-                patch.x === undefined
-                  ? sensor.x
-                  : Number(Math.min(current.bounds.width, Math.max(0, patch.x)).toFixed(2)),
-              y:
-                patch.y === undefined
-                  ? sensor.y
-                  : Number(Math.min(current.bounds.depth, Math.max(0, patch.y)).toFixed(2)),
-              temperature:
-                patch.temperature === undefined
-                  ? sensor.temperature
-                  : Number(patch.temperature.toFixed(1))
+              x: patch.x === undefined ? sensor.x : Number(Math.min(current.bounds.width, Math.max(0, patch.x)).toFixed(2)),
+              y: patch.y === undefined ? sensor.y : Number(Math.min(current.bounds.depth, Math.max(0, patch.y)).toFixed(2)),
+              temperature: patch.temperature === undefined ? sensor.temperature : Number(patch.temperature.toFixed(1))
             }
           : sensor
       )
@@ -299,10 +258,7 @@ export function AppShell() {
   }
 
   function deleteSensorPoint(sensorId: string) {
-    setLayout((current) => ({
-      ...current,
-      sensors: current.sensors.filter((sensor) => sensor.id !== sensorId)
-    }));
+    setLayout((current) => ({ ...current, sensors: current.sensors.filter((sensor) => sensor.id !== sensorId) }));
   }
 
   function addOpening(wallId: string, type: Opening["type"]) {
@@ -311,10 +267,7 @@ export function AppShell() {
       if (!opening) {
         return current;
       }
-      return syncDerivedLayoutData({
-        ...current,
-        openings: [...current.openings, opening]
-      });
+      return syncDerivedLayoutData({ ...current, openings: [...current.openings, opening] });
     });
   }
 
@@ -336,12 +289,7 @@ export function AppShell() {
   }
 
   function deleteOpening(openingId: string) {
-    setLayout((current) =>
-      syncDerivedLayoutData({
-        ...current,
-        openings: current.openings.filter((opening) => opening.id !== openingId)
-      })
-    );
+    setLayout((current) => syncDerivedLayoutData({ ...current, openings: current.openings.filter((opening) => opening.id !== openingId) }));
   }
 
   function addDevice(roomId: string, type: ClimateDevice["type"]) {
@@ -350,10 +298,7 @@ export function AppShell() {
       if (!device) {
         return current;
       }
-      return syncDerivedLayoutData({
-        ...current,
-        devices: [...(current.devices ?? []), device]
-      });
+      return syncDerivedLayoutData({ ...current, devices: [...(current.devices ?? []), device] });
     });
   }
 
@@ -369,12 +314,7 @@ export function AppShell() {
   }
 
   function deleteDevice(deviceId: string) {
-    setLayout((current) =>
-      syncDerivedLayoutData({
-        ...current,
-        devices: (current.devices ?? []).filter((device) => device.id !== deviceId)
-      })
-    );
+    setLayout((current) => syncDerivedLayoutData({ ...current, devices: (current.devices ?? []).filter((device) => device.id !== deviceId) }));
   }
 
   function replaceLayout(nextLayout: HouseLayout) {
@@ -385,12 +325,7 @@ export function AppShell() {
     if (!selectedWallId) {
       return;
     }
-    setLayout((current) =>
-      syncDerivedLayoutData({
-        ...current,
-        walls: current.walls.filter((wall) => wall.id !== selectedWallId)
-      })
-    );
+    setLayout((current) => syncDerivedLayoutData({ ...current, walls: current.walls.filter((wall) => wall.id !== selectedWallId) }));
     setSelectedWallId(null);
   }
 
@@ -400,20 +335,14 @@ export function AppShell() {
   }
 
   function toggleLayer(key: keyof SceneLayers) {
-    setLayers((current) => ({
-      ...current,
-      [key]: !current[key]
-    }));
+    setLayers((current) => ({ ...current, [key]: !current[key] }));
     if (key === "heat" || key === "airflow" || key === "fengshui") {
       setActiveAnalysis(key);
     }
   }
 
   function updateAnalysisControl<K extends keyof AnalysisControls>(key: K, value: AnalysisControls[K]) {
-    setAnalysisControls((current) => ({
-      ...current,
-      [key]: value
-    }));
+    setAnalysisControls((current) => ({ ...current, [key]: value }));
   }
 
   const selectedRoomWalls = selectedRoom ? layout.walls.filter((wall) => wall.roomId === selectedRoom.id) : [];
@@ -428,9 +357,9 @@ export function AppShell() {
         </div>
         <div className="layer-strip analysis-switch" aria-label="analysis layers">
           {[
-            ["heat", "Thermal", "heat"],
-            ["airflow", "Airflow", "air"],
-            ["fengshui", "Compass", "compass"]
+            ["heat", "热力", "heat"],
+            ["airflow", "气流", "air"],
+            ["fengshui", "罗盘", "compass"]
           ].map(([key, label, icon]) => (
             <button
               key={key}
@@ -443,35 +372,31 @@ export function AppShell() {
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className={`aux-layer-toggle ${layers.walls ? "active" : ""}`}
-          onClick={() => toggleLayer("walls")}
-        >
+        <button type="button" className={`aux-layer-toggle ${layers.walls ? "active" : ""}`} onClick={() => toggleLayer("walls")}>
           <ToolIcon name="walls" />
-          <span>Walls</span>
+          <span>结构</span>
         </button>
-        <div className="status-pill">{simulationPending ? "Solving field" : validation.length === 0 ? "Model valid" : `${validation.length} issue(s)`}</div>
+        <div className="status-pill">{simulationPending ? "场计算中" : validation.length === 0 ? "模型有效" : `${validation.length} 个问题`}</div>
       </header>
 
       <div className="studio-body">
         <nav className="tool-rail" aria-label="main tools">
-          <button type="button" className={editorMode === "select" ? "active" : ""} title="Select" onClick={() => setEditorMode("select")}>
+          <button type="button" className={editorMode === "select" ? "active" : ""} title="选择" onClick={() => setEditorMode("select")}>
             <ToolIcon name="select" />
           </button>
-          <button type="button" className={editorMode === "draw-wall" ? "active" : ""} title="Draw wall" onClick={() => setEditorMode("draw-wall")}>
+          <button type="button" className={editorMode === "draw-wall" ? "active" : ""} title="画墙" onClick={() => setEditorMode("draw-wall")}>
             <ToolIcon name="wall" />
           </button>
-          <button type="button" disabled={!quickOpeningWallId} title="Add door" onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "door")}>
+          <button type="button" disabled={!quickOpeningWallId} title="加门" onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "door")}>
             <ToolIcon name="door" />
           </button>
-          <button type="button" disabled={!quickOpeningWallId} title="Add window" onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "window")}>
+          <button type="button" disabled={!quickOpeningWallId} title="加窗" onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "window")}>
             <ToolIcon name="window" />
           </button>
-          <button type="button" disabled={!selectedRoom} title="Add AC" onClick={() => selectedRoom && addDevice(selectedRoom.id, "ac")}>
+          <button type="button" disabled={!selectedRoom} title="加空调" onClick={() => selectedRoom && addDevice(selectedRoom.id, "ac")}>
             <ToolIcon name="ac" />
           </button>
-          <button type="button" title="Add sensor" onClick={addSensorPoint}>
+          <button type="button" title="加温度点" onClick={addSensorPoint}>
             <ToolIcon name="sensor" />
           </button>
         </nav>
@@ -503,16 +428,11 @@ export function AppShell() {
         <aside className="inspector">
           <div className="inspector-tabs">
             {[
-              ["properties", "Properties"],
-              ["files", "Files"],
-              ["templates", "Templates"]
+              ["properties", "属性"],
+              ["files", "文件"],
+              ["templates", "模板"]
             ].map(([tab, label]) => (
-              <button
-                key={tab}
-                type="button"
-                className={inspectorTab === tab ? "active" : ""}
-                onClick={() => setInspectorTab(tab as InspectorTab)}
-              >
+              <button key={tab} type="button" className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab as InspectorTab)}>
                 {label}
               </button>
             ))}
@@ -567,60 +487,44 @@ export function AppShell() {
           {activeAnalysis === "heat" ? (
             <>
               <label className="toggle-field">
-                <input
-                  type="checkbox"
-                  checked={analysisControls.showHeatContours}
-                  onChange={(event) => updateAnalysisControl("showHeatContours", event.target.checked)}
-                />
-                <span>Contours</span>
+                <input type="checkbox" checked={analysisControls.showHeatContours} onChange={(event) => updateAnalysisControl("showHeatContours", event.target.checked)} />
+                <span>等温线</span>
               </label>
               <div className="legend-bar heat-legend" aria-hidden="true" />
               <div className="legend-readout">
-                <span>{simulation.heatField.min.toFixed(1)}C</span>
-                <span>{((simulation.heatField.min + simulation.heatField.max) / 2).toFixed(1)}C</span>
-                <span>{simulation.heatField.max.toFixed(1)}C</span>
+                <span>{simulation.heatField.min.toFixed(1)} C</span>
+                <span>{((simulation.heatField.min + simulation.heatField.max) / 2).toFixed(1)} C</span>
+                <span>{simulation.heatField.max.toFixed(1)} C</span>
               </div>
             </>
           ) : null}
           {activeAnalysis === "airflow" ? (
             <>
               <label className="toggle-field">
-                <input
-                  type="checkbox"
-                  checked={analysisControls.animateAirflow}
-                  onChange={(event) => updateAnalysisControl("animateAirflow", event.target.checked)}
-                />
-                <span>Animate</span>
+                <input type="checkbox" checked={analysisControls.animateAirflow} onChange={(event) => updateAnalysisControl("animateAirflow", event.target.checked)} />
+                <span>动画</span>
               </label>
               <label className="range-field">
-                <span>Density</span>
-                <input
-                  type="range"
-                  min={0.15}
-                  max={1}
-                  step={0.05}
-                  value={analysisControls.airflowParticleDensity}
-                  onChange={(event) => updateAnalysisControl("airflowParticleDensity", Number(event.target.value))}
-                />
+                <span>粒子密度</span>
+                <input type="range" min={0.15} max={1} step={0.05} value={analysisControls.airflowParticleDensity} onChange={(event) => updateAnalysisControl("airflowParticleDensity", Number(event.target.value))} />
               </label>
               <label className="range-field">
-                <span>Speed</span>
-                <input
-                  type="range"
-                  min={0.4}
-                  max={2.2}
-                  step={0.1}
-                  value={analysisControls.airflowParticleSpeed}
-                  onChange={(event) => updateAnalysisControl("airflowParticleSpeed", Number(event.target.value))}
-                />
+                <span>流速显示</span>
+                <input type="range" min={0.4} max={2.2} step={0.1} value={analysisControls.airflowParticleSpeed} onChange={(event) => updateAnalysisControl("airflowParticleSpeed", Number(event.target.value))} />
               </label>
               <div className="legend-bar flow-legend" aria-hidden="true" />
-              <span className="legend-note">{simulation.flowField.streamlines.length} paths</span>
+              <span className="legend-note">{simulation.flowField.streamlines.length} 条路径 / {simulation.flowField.seedPoints.length} 个种子</span>
             </>
           ) : null}
-          {activeAnalysis === "fengshui" ? (
-            <div className="legend-note">Compass, palace overlay and room reading share one layer.</div>
-          ) : null}
+          {activeAnalysis === "fengshui" ? <div className="legend-note">罗盘、九宫和房间解读共用同一层。</div> : null}
+          <label className="toggle-field">
+            <input type="checkbox" checked={analysisControls.showRoof} onChange={(event) => updateAnalysisControl("showRoof", event.target.checked)} />
+            <span>屋顶</span>
+          </label>
+          <label className="range-field">
+            <span>结构透明度</span>
+            <input type="range" min={0.18} max={0.92} step={0.02} value={analysisControls.structureOpacity} onChange={(event) => updateAnalysisControl("structureOpacity", Number(event.target.value))} />
+          </label>
         </div>
       </footer>
     </main>

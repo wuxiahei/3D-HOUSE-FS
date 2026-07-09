@@ -7,6 +7,8 @@ interface HeatSolveOptions {
   epsilon?: number;
 }
 
+const HEAT_LAYER_HEIGHTS = [0.08, 0.28, 0.5, 0.72, 0.92];
+
 function gridIndex(grid: SimGrid, column: number, row: number) {
   return row * grid.cols + column;
 }
@@ -60,6 +62,21 @@ function deviceInfluence(device: ClimateDevice, x: number, y: number) {
   return device.temperatureDelta * device.strength * falloff * 0.2;
 }
 
+function layerDeviceInfluence(device: ClimateDevice, x: number, y: number, heightRatio: number) {
+  const distance = Math.hypot(device.x - x, device.y - y);
+  const radius = device.type === "ac" ? 2.4 : 1.65;
+  const falloff = Math.exp(-(distance * distance) / (radius * radius));
+
+  if (device.type === "ac") {
+    const highJet = Math.exp(-((heightRatio - 0.66) * (heightRatio - 0.66)) / 0.035);
+    const floorWash = Math.exp(-((heightRatio - 0.26) * (heightRatio - 0.26)) / 0.09);
+    return -Math.abs(device.temperatureDelta) * device.strength * falloff * (0.07 + highJet * 0.15 + floorWash * 0.06);
+  }
+
+  const buoyantLift = 0.35 + heightRatio * 1.25;
+  return Math.abs(device.temperatureDelta) * device.strength * falloff * buoyantLift * 0.08;
+}
+
 function heatSources(layout: HouseLayout, grid: SimGrid) {
   const source = new Float32Array(grid.cols * grid.rows);
   const roomPurpose = new Map(layout.rooms.map((room) => [room.id, room.purpose]));
@@ -75,16 +92,73 @@ function heatSources(layout: HouseLayout, grid: SimGrid) {
       const purpose = grid.roomIds[index] ? roomPurpose.get(grid.roomIds[index] ?? "") : null;
       const kitchenGain = purpose === "kitchen" ? 0.38 : 0;
       const solarGain = roomSolarGain(layout, center.x, center.y);
-      const devices = (layout.devices ?? []).reduce(
-        (total, device) => total + deviceInfluence(device, center.x, center.y),
-        0
-      );
+      const devices = (layout.devices ?? []).reduce((total, device) => {
+        if (grid.roomIds[index] !== device.roomId) {
+          return total;
+        }
+        return total + deviceInfluence(device, center.x, center.y);
+      }, 0);
 
       source[index] = solarGain + kitchenGain + devices;
     }
   }
 
   return source;
+}
+
+function thermalPlumes(layout: HouseLayout): HeatField["thermalPlumes"] {
+  const plumes = (layout.devices ?? []).map((device) => ({
+    x: device.x,
+    y: device.y,
+    radius: device.type === "ac" ? 0.72 + device.strength * 0.38 : 0.62 + device.strength * 0.42,
+    strength: Math.max(0.15, Math.abs(device.temperatureDelta) * device.strength * 0.08),
+    kind: device.type === "ac" ? ("cool" as const) : ("warm" as const)
+  }));
+
+  const kitchenHasDevice = new Set((layout.devices ?? []).filter((device) => device.type === "kitchen-heat").map((device) => device.roomId));
+  for (const room of layout.rooms) {
+    if (room.purpose !== "kitchen" || kitchenHasDevice.has(room.id)) {
+      continue;
+    }
+    plumes.push({
+      x: room.origin.x + room.width * 0.5,
+      y: room.origin.y + room.depth * 0.5,
+      radius: Math.max(0.55, Math.min(room.width, room.depth) * 0.18),
+      strength: 0.42,
+      kind: "warm"
+    });
+  }
+
+  return plumes;
+}
+
+function buildHeatLayers(layout: HouseLayout, grid: SimGrid, baseTemperature: Float32Array, sources: Float32Array) {
+  return HEAT_LAYER_HEIGHTS.map((heightRatio) => {
+    const layer = new Float32Array(baseTemperature.length);
+    for (let row = 0; row < grid.rows; row += 1) {
+      for (let column = 0; column < grid.cols; column += 1) {
+        const index = gridIndex(grid, column, row);
+        if (!grid.interior[index]) {
+          layer[index] = layout.weather.outdoorTemperature;
+          continue;
+        }
+
+        const center = cellCenter(grid, column, row);
+        const warmSource = Math.max(0, sources[index]);
+        const coolSource = Math.min(0, sources[index]);
+        const stableStratification = (heightRatio - 0.42) * 0.58;
+        const buoyantStack = warmSource * (heightRatio - 0.32) * 0.48;
+        const coolPool = coolSource * Math.max(0, 0.55 - heightRatio) * 0.42;
+        const deviceStack = (layout.devices ?? []).reduce(
+          (total, device) => total + layerDeviceInfluence(device, center.x, center.y, heightRatio),
+          0
+        );
+
+        layer[index] = baseTemperature[index] + stableStratification + buoyantStack + coolPool + deviceStack;
+      }
+    }
+    return layer;
+  });
 }
 
 function initialTemperature(layout: HouseLayout, grid: SimGrid, constraints: ReturnType<typeof sensorConstraints>) {
@@ -188,19 +262,25 @@ export function solveHeat(layout: HouseLayout, options: HeatSolveOptions = {}): 
     }
   }
 
+  const layers = buildHeatLayers(layout, grid, current, sources);
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
-  for (let index = 0; index < current.length; index += 1) {
-    if (!grid.interior[index]) {
-      continue;
+  for (const layer of layers) {
+    for (let index = 0; index < layer.length; index += 1) {
+      if (!grid.interior[index]) {
+        continue;
+      }
+      min = Math.min(min, layer[index]);
+      max = Math.max(max, layer[index]);
     }
-    min = Math.min(min, current[index]);
-    max = Math.max(max, current[index]);
   }
 
   return {
     grid,
     temperature: current,
+    layers,
+    layerHeights: HEAT_LAYER_HEIGHTS.map((heightRatio) => heightRatio * layout.bounds.height),
+    thermalPlumes: thermalPlumes(layout),
     min: Number.isFinite(min) ? min : outdoor,
     max: Number.isFinite(max) ? max : outdoor
   };

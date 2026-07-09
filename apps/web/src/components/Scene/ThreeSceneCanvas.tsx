@@ -18,6 +18,8 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls as ThreeOrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
+const noRaycast: THREE.Object3D["raycast"] = () => undefined;
+
 function sceneX(layout: HouseLayout, x: number) {
   return x - layout.bounds.width / 2;
 }
@@ -84,13 +86,47 @@ function cellAt(field: FlowField, x: number, y: number) {
 }
 
 function sampleFlowField(field: FlowField, x: number, y: number) {
-  const cell = cellAt(field, x, y);
-  if (!cell) {
-    return { x: 0, y: 0, speed: 0 };
+  const gx = (x - field.grid.originX) / field.grid.cellSize - 0.5;
+  const gy = (y - field.grid.originY) / field.grid.cellSize - 0.5;
+  const column0 = Math.floor(gx);
+  const row0 = Math.floor(gy);
+  const tx = gx - column0;
+  const ty = gy - row0;
+  let vx = 0;
+  let vy = 0;
+  let w = 0;
+  let curl = 0;
+  let totalWeight = 0;
+
+  for (let rowOffset = 0; rowOffset <= 1; rowOffset += 1) {
+    for (let columnOffset = 0; columnOffset <= 1; columnOffset += 1) {
+      const column = column0 + columnOffset;
+      const row = row0 + rowOffset;
+      if (column < 0 || column >= field.grid.cols || row < 0 || row >= field.grid.rows) {
+        continue;
+      }
+      const index = row * field.grid.cols + column;
+      if (!field.grid.interior[index]) {
+        continue;
+      }
+      const weight = (columnOffset === 0 ? 1 - tx : tx) * (rowOffset === 0 ? 1 - ty : ty);
+      vx += field.vx[index] * weight;
+      vy += field.vy[index] * weight;
+      w += (field.verticalVelocity[index] ?? 0) * weight;
+      curl += (field.vorticity[index] ?? 0) * weight;
+      totalWeight += weight;
+    }
   }
-  const vx = field.vx[cell.index];
-  const vy = field.vy[cell.index];
-  return { x: vx, y: vy, speed: Math.hypot(vx, vy) };
+
+  if (totalWeight <= 0.0001) {
+    return { x: 0, y: 0, w: 0, curl: 0, speed: 0 };
+  }
+
+  vx /= totalWeight;
+  vy /= totalWeight;
+  w /= totalWeight;
+  curl /= totalWeight;
+  return { x: vx, y: vy, w, curl, speed: Math.hypot(vx, vy) };
 }
 
 function pointRoomId(layout: HouseLayout, x: number, y: number) {
@@ -338,7 +374,7 @@ function directionToRadians(direction: string) {
   return map[direction] ?? 0;
 }
 
-function makeLabelTexture(text: string, accent = "#19c2ff") {
+function makeLabelTexture(text: string, accent = "#19c2ff", boxed = true) {
   const canvas = document.createElement("canvas");
   canvas.width = 256;
   canvas.height = 96;
@@ -346,14 +382,20 @@ function makeLabelTexture(text: string, accent = "#19c2ff") {
   if (!context) {
     return new THREE.CanvasTexture(canvas);
   }
-  context.fillStyle = "rgba(12, 17, 17, 0.78)";
-  context.strokeStyle = "rgba(255, 255, 255, 0.22)";
-  context.lineWidth = 2;
-  context.roundRect(8, 8, 240, 80, 10);
-  context.fill();
-  context.stroke();
+  if (boxed) {
+    context.fillStyle = "rgba(12, 17, 17, 0.78)";
+    context.strokeStyle = "rgba(255, 255, 255, 0.22)";
+    context.lineWidth = 2;
+    context.roundRect(8, 8, 240, 80, 10);
+    context.fill();
+    context.stroke();
+  } else {
+    context.shadowColor = "rgba(0, 0, 0, 0.7)";
+    context.shadowBlur = 12;
+    context.shadowOffsetY = 2;
+  }
   context.fillStyle = accent;
-  context.font = "600 26px Microsoft YaHei, Segoe UI, sans-serif";
+  context.font = boxed ? "600 26px Microsoft YaHei, Segoe UI, sans-serif" : "700 34px Microsoft YaHei, Segoe UI, sans-serif";
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillText(text, 128, 48, 220);
@@ -365,15 +407,19 @@ function makeLabelTexture(text: string, accent = "#19c2ff") {
 function LabelSprite({
   text,
   position,
-  accent
+  accent,
+  boxed = true,
+  scale = [1.35, 0.5, 1]
 }: {
   text: string;
   position: [number, number, number];
   accent?: string;
+  boxed?: boolean;
+  scale?: [number, number, number];
 }) {
-  const texture = useMemo(() => makeLabelTexture(text, accent), [accent, text]);
+  const texture = useMemo(() => makeLabelTexture(text, accent, boxed), [accent, boxed, text]);
   return (
-    <sprite position={position} scale={[1.35, 0.5, 1]}>
+    <sprite position={position} scale={scale}>
       <spriteMaterial map={texture} transparent depthWrite={false} />
     </sprite>
   );
@@ -513,6 +559,8 @@ const heatFragmentShader = `
   uniform float uMin;
   uniform float uMax;
   uniform float uTime;
+  uniform float uAlpha;
+  uniform float uContourStrength;
   uniform bool uContours;
   varying vec2 vUv;
 
@@ -543,12 +591,115 @@ const heatFragmentShader = `
       float contour = abs(fract(band) - 0.5);
       float width = max(fwidth(band) * 1.35, 0.012);
       float line = 1.0 - smoothstep(width, width * 2.0, contour);
-      color = mix(color, vec3(1.0), line * 0.42);
+      color = mix(color, vec3(1.0), line * uContourStrength);
     }
 
-    gl_FragColor = vec4(color, 0.86);
+    gl_FragColor = vec4(color, uAlpha);
   }
 `;
+
+function HeatFieldColumns({
+  layout,
+  field
+}: {
+  layout: HouseLayout;
+  field: HeatField;
+}) {
+  const columns = useMemo(() => {
+    const stride = Math.max(2, Math.round(Math.max(field.grid.cols, field.grid.rows) / 22));
+    const span = Math.max(0.001, field.max - field.min);
+    const items: {
+      id: string;
+      x: number;
+      z: number;
+      height: number;
+      width: number;
+      color: THREE.Color;
+      opacity: number;
+    }[] = [];
+
+    for (let row = 0; row < field.grid.rows; row += stride) {
+      for (let column = 0; column < field.grid.cols; column += stride) {
+        const index = row * field.grid.cols + column;
+        if (!field.grid.interior[index]) {
+          continue;
+        }
+        const centerX = field.grid.originX + (column + 0.5) * field.grid.cellSize;
+        const centerY = field.grid.originY + (row + 0.5) * field.grid.cellSize;
+        const normalized = THREE.MathUtils.clamp((field.temperature[index] - field.min) / span, 0, 1);
+        items.push({
+          id: `${column}-${row}`,
+          x: sceneX(layout, centerX),
+          z: sceneZ(layout, centerY),
+          height: 0.18 + normalized * 0.86,
+          width: field.grid.cellSize * stride * 0.62,
+          color: colorFromRamp(normalized),
+          opacity: 0.16 + normalized * 0.2
+        });
+      }
+    }
+
+    return items;
+  }, [field, layout]);
+
+  return (
+    <group>
+      {columns.map((column) => (
+        <mesh key={column.id} position={[column.x, 0.16 + column.height / 2, column.z]} raycast={noRaycast}>
+          <boxGeometry args={[column.width, column.height, column.width]} />
+          <meshStandardMaterial
+            color={column.color}
+            emissive={column.color}
+            emissiveIntensity={0.16}
+            transparent
+            opacity={column.opacity}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function HeatPlumes({ layout, field }: { layout: HouseLayout; field: HeatField }) {
+  return (
+    <group>
+      {field.thermalPlumes.map((plume, index) => {
+        const height = layout.bounds.height * (plume.kind === "warm" ? 0.84 : 0.58);
+        const color = plume.kind === "warm" ? new THREE.Color("#ff7a22") : new THREE.Color("#48d6ff");
+        const y = plume.kind === "warm" ? height / 2 + 0.16 : layout.bounds.height - height / 2 - 0.18;
+        return (
+          <group key={`${plume.kind}-${index}`} position={[sceneX(layout, plume.x), y, sceneZ(layout, plume.y)]}>
+            <mesh raycast={noRaycast}>
+              <cylinderGeometry
+                args={[
+                  plume.radius * (plume.kind === "warm" ? 0.55 : 0.28),
+                  plume.radius * (plume.kind === "warm" ? 0.2 : 0.62),
+                  height,
+                  32,
+                  1,
+                  true
+                ]}
+              />
+              <meshBasicMaterial
+                color={color}
+                transparent
+                opacity={THREE.MathUtils.clamp(0.08 + plume.strength * 0.12, 0.08, 0.24)}
+                depthWrite={false}
+                side={THREE.DoubleSide}
+                blending={THREE.AdditiveBlending}
+              />
+            </mesh>
+            <mesh position={[0, plume.kind === "warm" ? height / 2 : -height / 2, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={noRaycast}>
+              <ringGeometry args={[plume.radius * 0.38, plume.radius * 0.68, 36]} />
+              <meshBasicMaterial color={color} transparent opacity={0.24} depthWrite={false} />
+            </mesh>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
 
 function HeatFieldOverlay({
   layout,
@@ -563,8 +714,23 @@ function HeatFieldOverlay({
   visible: boolean;
   showContours: boolean;
 }) {
-  const temperatureTexture = useMemo(
-    () => makeScalarTexture(field.temperature, field.grid.cols, field.grid.rows),
+  const temperatureLayers = useMemo(() => (field.layers.length > 0 ? field.layers : [field.temperature]), [field]);
+  const renderLayers = useMemo(
+    () =>
+      temperatureLayers.map((_, index) => {
+        const ratio = temperatureLayers.length <= 1 ? 0 : index / (temperatureLayers.length - 1);
+        return {
+          id: `heat-layer-${index}`,
+          y: THREE.MathUtils.clamp(field.layerHeights[index] ?? layout.bounds.height * ratio, 0.112, layout.bounds.height - 0.18),
+          scale: 1 - ratio * 0.055,
+          alpha: index === 0 ? 0.76 : THREE.MathUtils.lerp(0.2, 0.34, 1 - Math.abs(ratio - 0.5) * 1.2),
+          contourStrength: THREE.MathUtils.lerp(0.42, 0.12, ratio)
+        };
+      }),
+    [field.layerHeights, layout.bounds.height, temperatureLayers]
+  );
+  const temperatureTextures = useMemo(
+    () => temperatureLayers.map((layer) => makeScalarTexture(layer, field.grid.cols, field.grid.rows)),
     [field]
   );
   const maskTexture = useMemo(
@@ -572,27 +738,32 @@ function HeatFieldOverlay({
     [field]
   );
   const uniforms = useMemo(
-    () => ({
-      uTemperature: { value: temperatureTexture },
-      uMask: { value: maskTexture },
-      uMin: { value: field.min },
-      uMax: { value: field.max },
-      uTime: { value: 0 },
-      uContours: { value: showContours }
-    }),
-    [field.max, field.min, maskTexture, showContours, temperatureTexture]
+    () =>
+      renderLayers.map((layer, index) => ({
+        uTemperature: { value: temperatureTextures[index] ?? temperatureTextures[0] },
+        uMask: { value: maskTexture },
+        uMin: { value: field.min },
+        uMax: { value: field.max },
+        uTime: { value: 0 },
+        uAlpha: { value: layer.alpha },
+        uContourStrength: { value: layer.contourStrength },
+        uContours: { value: showContours }
+      })),
+    [field.max, field.min, maskTexture, renderLayers, showContours, temperatureTextures]
   );
 
   useFrame(({ clock }) => {
-    uniforms.uTime.value = clock.elapsedTime;
+    uniforms.forEach((layerUniforms, index) => {
+      layerUniforms.uTime.value = clock.elapsedTime + index * 0.73;
+    });
   });
 
   useEffect(() => {
     return () => {
-      temperatureTexture.dispose();
+      temperatureTextures.forEach((texture) => texture.dispose());
       maskTexture.dispose();
     };
-  }, [maskTexture, temperatureTexture]);
+  }, [maskTexture, temperatureTextures]);
 
   if (!visible) {
     return null;
@@ -600,16 +771,27 @@ function HeatFieldOverlay({
 
   return (
     <>
-      <mesh position={[0, 0.106, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[layout.bounds.width, layout.bounds.depth, 1, 1]} />
-        <shaderMaterial
-          vertexShader={heatVertexShader}
-          fragmentShader={heatFragmentShader}
-          uniforms={uniforms}
-          transparent
-          depthWrite={false}
-        />
-      </mesh>
+      {renderLayers.map((layer, index) => (
+        <mesh
+          key={layer.id}
+          position={[0, layer.y, 0]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          scale={[layer.scale, layer.scale, 1]}
+          raycast={noRaycast}
+        >
+          <planeGeometry args={[layout.bounds.width, layout.bounds.depth, 1, 1]} />
+          <shaderMaterial
+            vertexShader={heatVertexShader}
+            fragmentShader={heatFragmentShader}
+            uniforms={uniforms[index]}
+            transparent
+            depthWrite={false}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      ))}
+      <HeatFieldColumns layout={layout} field={field} />
+      <HeatPlumes layout={layout} field={field} />
       {sensors.map((sensor) => (
         <group key={sensor.id} position={[sceneX(layout, sensor.x), 0.42, sceneZ(layout, sensor.y)]}>
           <mesh>
@@ -787,42 +969,74 @@ function AirflowParticles({
   animate: boolean;
 }) {
   const particleBundle = useMemo(() => {
-    const count = Math.round(THREE.MathUtils.lerp(360, 1450, density));
+    const count = Math.round(THREE.MathUtils.lerp(760, 2600, density));
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
     const colors = new Float32Array(count * 3);
     const life = new Float32Array(count);
     const color = new THREE.Color();
 
-    const seeds =
-      field.inlets.length > 0
-        ? field.inlets
-        : layout.rooms.map((room) => ({
-            x: room.origin.x + room.width * 0.5,
-            y: room.origin.y + room.depth * 0.5,
-            strength: 0.25
-          }));
+    const inletSeeds = field.inlets.filter((seed) => cellAt(field, seed.x, seed.y));
+    const interiorSeeds: { x: number; y: number; strength: number; roomId: string | null }[] = [];
 
-    function respawn(index: number) {
-      const seed = seeds[Math.floor(Math.random() * seeds.length)] ?? {
+    for (let row = 0; row < field.grid.rows; row += 1) {
+      for (let column = 0; column < field.grid.cols; column += 1) {
+        const index = row * field.grid.cols + column;
+        if (!field.grid.interior[index]) {
+          continue;
+        }
+        const speed = Math.hypot(field.vx[index], field.vy[index]);
+        interiorSeeds.push({
+          x: field.grid.originX + (column + 0.5) * field.grid.cellSize,
+          y: field.grid.originY + (row + 0.5) * field.grid.cellSize,
+          strength: 0.18 + Math.min(1, speed / Math.max(0.001, field.speedMax)) * 0.82,
+          roomId: field.grid.roomIds[index]
+        });
+      }
+    }
+
+    function pickSeed() {
+      if (inletSeeds.length > 0 && Math.random() < 0.48) {
+        return inletSeeds[Math.floor(Math.random() * inletSeeds.length)];
+      }
+      if (selectedRoomId) {
+        const selectedSeeds = interiorSeeds.filter((seed) => seed.roomId === selectedRoomId);
+        if (selectedSeeds.length > 0 && Math.random() < 0.62) {
+          return selectedSeeds[Math.floor(Math.random() * selectedSeeds.length)];
+        }
+      }
+      return interiorSeeds[Math.floor(Math.random() * interiorSeeds.length)] ?? {
         x: layout.bounds.width / 2,
         y: layout.bounds.depth / 2,
         strength: 0.2
       };
-      const jitter = field.grid.cellSize * 2.2;
-      const x = THREE.MathUtils.clamp(seed.x + (Math.random() - 0.5) * jitter, 0, layout.bounds.width);
-      const y = THREE.MathUtils.clamp(seed.y + (Math.random() - 0.5) * jitter, 0, layout.bounds.depth);
+    }
+
+    function respawn(index: number) {
+      const seed = pickSeed();
+      const jitter = field.grid.cellSize * (inletSeeds.includes(seed) ? 2.1 : 0.82);
+      let x = THREE.MathUtils.clamp(seed.x + (Math.random() - 0.5) * jitter, 0, layout.bounds.width);
+      let y = THREE.MathUtils.clamp(seed.y + (Math.random() - 0.5) * jitter, 0, layout.bounds.depth);
+      if (!cellAt(field, x, y)) {
+        x = seed.x;
+        y = seed.y;
+      }
       const velocity = sampleFlowField(field, x, y);
       const speed = Math.min(1, velocity.speed / Math.max(0.001, field.speedMax));
-      color.copy(colorFromRamp(0.18 + speed * 0.72));
+      const verticalBias = THREE.MathUtils.clamp(velocity.w * 1.8, -0.18, 0.28);
+      color.copy(colorFromRamp(0.18 + speed * 0.68 + Math.abs(velocity.curl) * 0.08));
 
       positions[index * 3] = sceneX(layout, x);
-      positions[index * 3 + 1] = 0.28 + speed * 0.72 + Math.random() * 0.2;
+      positions[index * 3 + 1] = THREE.MathUtils.clamp(
+        0.36 + speed * 0.92 + verticalBias + Math.random() * 0.38,
+        0.24,
+        layout.bounds.height - 0.18
+      );
       positions[index * 3 + 2] = sceneZ(layout, y);
       colors[index * 3] = color.r;
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
-      life[index] = 1.2 + Math.random() * 2.6 + seed.strength * 0.8;
+      life[index] = 1.4 + Math.random() * 3.2 + seed.strength * 0.9;
     }
 
     for (let index = 0; index < count; index += 1) {
@@ -833,7 +1047,7 @@ function AirflowParticles({
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
     return { count, geometry, positions, colors, life, respawn };
-  }, [density, field, layout]);
+  }, [density, field, layout, selectedRoomId]);
 
   useEffect(() => {
     return () => {
@@ -854,25 +1068,36 @@ function AirflowParticles({
       const speedNorm = Math.min(1, speed / Math.max(0.001, field.speedMax));
       particleBundle.life[index] -= delta * (0.58 + speedNorm);
 
-      if (particleBundle.life[index] <= 0 || speedNorm < 0.025 || !cellAt(field, px, py)) {
+      if (particleBundle.life[index] <= 0 || !cellAt(field, px, py)) {
         particleBundle.respawn(index);
         continue;
       }
 
-      const step = delta * speedScale * (0.6 + speedNorm * 1.8);
-      const nextX = px + (velocity.x / Math.max(0.0001, speed)) * step;
-      const nextY = py + (velocity.y / Math.max(0.0001, speed)) * step;
+      const step = delta * speedScale * (0.58 + speedNorm * 2.15);
+      const canAdvect = speed > 0.0001;
+      const midX = canAdvect ? px + (velocity.x / speed) * step * 0.5 : px;
+      const midY = canAdvect ? py + (velocity.y / speed) * step * 0.5 : py;
+      const midVelocity = sampleFlowField(field, midX, midY);
+      const midSpeed = Math.hypot(midVelocity.x, midVelocity.y);
+      const nextX = midSpeed > 0.0001 ? px + (midVelocity.x / midSpeed) * step : px;
+      const nextY = midSpeed > 0.0001 ? py + (midVelocity.y / midSpeed) * step : py;
       if (!cellAt(field, nextX, nextY)) {
         particleBundle.respawn(index);
         continue;
       }
 
       const roomId = pointRoomId(layout, nextX, nextY);
-      const dim = selectedRoomId && roomId !== selectedRoomId ? 0.45 : 1;
-      color.copy(colorFromRamp(0.18 + speedNorm * 0.72)).multiplyScalar(dim);
+      const dim = selectedRoomId && roomId !== selectedRoomId ? 0.42 : 1;
+      color.copy(colorFromRamp(0.18 + speedNorm * 0.66 + Math.min(0.14, Math.abs(velocity.curl) * 0.12))).multiplyScalar(dim);
+      const currentHeight = particleBundle.positions[index * 3 + 1];
+      const nextHeight =
+        currentHeight +
+        velocity.w * delta * speedScale * 1.8 +
+        Math.sin(clock.elapsedTime * 4 + index) * 0.018 +
+        (speedNorm - 0.42) * 0.01;
 
       particleBundle.positions[index * 3] = sceneX(layout, nextX);
-      particleBundle.positions[index * 3 + 1] = 0.24 + speedNorm * 0.74 + Math.sin(clock.elapsedTime * 4 + index) * 0.035;
+      particleBundle.positions[index * 3 + 1] = THREE.MathUtils.clamp(nextHeight, 0.22, layout.bounds.height - 0.16);
       particleBundle.positions[index * 3 + 2] = sceneZ(layout, nextY);
       particleBundle.colors[index * 3] = color.r;
       particleBundle.colors[index * 3 + 1] = color.g;
@@ -887,8 +1112,96 @@ function AirflowParticles({
 
   return (
     <points geometry={particleBundle.geometry}>
-      <pointsMaterial size={0.055} vertexColors transparent opacity={0.78} depthWrite={false} blending={THREE.AdditiveBlending} />
+      <pointsMaterial size={0.045 + density * 0.022} vertexColors transparent opacity={0.82} depthWrite={false} blending={THREE.AdditiveBlending} />
     </points>
+  );
+}
+
+function makeAirflowGlyphGeometry(layout: HouseLayout, field: FlowField, selectedRoomId: string | null) {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const stride = Math.max(1, Math.round(Math.max(field.grid.cols, field.grid.rows) / 34));
+  const color = new THREE.Color();
+
+  for (let row = 0; row < field.grid.rows; row += stride) {
+    for (let column = 0; column < field.grid.cols; column += stride) {
+      const index = row * field.grid.cols + column;
+      if (!field.grid.interior[index]) {
+        continue;
+      }
+
+      const vx = field.vx[index];
+      const vy = field.vy[index];
+      const speed = Math.hypot(vx, vy);
+      if (speed <= field.speedMax * 0.012) {
+        continue;
+      }
+
+      const speedNorm = Math.min(1, speed / Math.max(0.001, field.speedMax));
+      const centerX = field.grid.originX + (column + 0.5) * field.grid.cellSize;
+      const centerY = field.grid.originY + (row + 0.5) * field.grid.cellSize;
+      const length = field.grid.cellSize * stride * (0.28 + speedNorm * 0.82);
+      const ux = vx / speed;
+      const uy = vy / speed;
+      const roomId = field.grid.roomIds[index];
+      const dim = selectedRoomId && roomId !== selectedRoomId ? 0.38 : 1;
+      const y = 0.16 + speedNorm * 0.24;
+      const vertical = field.verticalVelocity[index] ?? 0;
+      const curl = Math.abs(field.vorticity[index] ?? 0);
+
+      color.copy(colorFromRamp(0.18 + speedNorm * 0.66 + Math.min(0.14, curl * 0.12))).multiplyScalar(dim);
+      positions.push(
+        sceneX(layout, centerX - ux * length * 0.5),
+        y,
+        sceneZ(layout, centerY - uy * length * 0.5),
+        sceneX(layout, centerX + ux * length * 0.5),
+        y,
+        sceneZ(layout, centerY + uy * length * 0.5)
+      );
+      colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+
+      if (Math.abs(vertical) > 0.018) {
+        const lift = THREE.MathUtils.clamp(vertical * 3.4, -0.42, 0.52);
+        positions.push(
+          sceneX(layout, centerX),
+          y,
+          sceneZ(layout, centerY),
+          sceneX(layout, centerX),
+          THREE.MathUtils.clamp(y + lift, 0.16, layout.bounds.height - 0.12),
+          sceneZ(layout, centerY)
+        );
+        colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+      }
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  return geometry;
+}
+
+function AirflowGlyphLayer({
+  layout,
+  field,
+  selectedRoomId
+}: {
+  layout: HouseLayout;
+  field: FlowField;
+  selectedRoomId: string | null;
+}) {
+  const geometry = useMemo(() => makeAirflowGlyphGeometry(layout, field, selectedRoomId), [field, layout, selectedRoomId]);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
+  return (
+    <lineSegments geometry={geometry} raycast={noRaycast} renderOrder={3}>
+      <lineBasicMaterial vertexColors transparent opacity={0.54} depthWrite={false} />
+    </lineSegments>
   );
 }
 
@@ -911,6 +1224,7 @@ function AirflowFieldOverlay({
 
   return (
     <>
+      <AirflowGlyphLayer layout={layout} field={field} selectedRoomId={selectedRoomId} />
       <AirflowParticles
         layout={layout}
         field={field}
@@ -972,11 +1286,13 @@ function WallMeshes({
   layout,
   selectedWallId,
   visible,
+  opacity,
   onSelectWall
 }: {
   layout: HouseLayout;
   selectedWallId: string | null;
   visible: boolean;
+  opacity: number;
   onSelectWall: (wallId: string | null) => void;
 }) {
   if (!visible) {
@@ -990,6 +1306,7 @@ function WallMeshes({
         const length = wallLength(wall);
         const rotation = wallRotationRadians(wall);
         const isSelected = wall.id === selectedWallId;
+        const materialOpacity = isSelected ? Math.max(0.78, opacity) : opacity;
         return (
           <mesh
             key={wall.id}
@@ -1007,11 +1324,55 @@ function WallMeshes({
               emissive={isSelected ? "#2a9fd6" : "#000000"}
               emissiveIntensity={isSelected ? 0.28 : 0}
               roughness={0.62}
+              transparent={materialOpacity < 0.99}
+              opacity={materialOpacity}
             />
           </mesh>
         );
       })}
     </>
+  );
+}
+
+function RoofMesh({
+  layout,
+  visible,
+  opacity
+}: {
+  layout: HouseLayout;
+  visible: boolean;
+  opacity: number;
+}) {
+  if (!visible) {
+    return null;
+  }
+
+  const y = layout.bounds.height + 0.04;
+  const roofOpacity = Math.min(0.42, Math.max(0.16, opacity * 0.46));
+
+  return (
+    <group position={[0, y, 0]}>
+      <mesh receiveShadow>
+        <boxGeometry args={[layout.bounds.width + 0.24, 0.08, layout.bounds.depth + 0.24]} />
+        <meshStandardMaterial
+          color="#d9edf0"
+          emissive="#5fd8f2"
+          emissiveIntensity={0.04}
+          roughness={0.48}
+          transparent
+          opacity={roofOpacity}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh position={[0, 0.06, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[Math.max(layout.bounds.width, layout.bounds.depth) * 0.5, Math.max(layout.bounds.width, layout.bounds.depth) * 0.5 + 0.015, 96]} />
+        <meshBasicMaterial color="#bff5ff" transparent opacity={0.28} depthWrite={false} />
+      </mesh>
+      <lineSegments>
+        <edgesGeometry args={[new THREE.BoxGeometry(layout.bounds.width + 0.24, 0.1, layout.bounds.depth + 0.24)]} />
+        <lineBasicMaterial color="#c9fbff" transparent opacity={0.5} />
+      </lineSegments>
+    </group>
   );
 }
 
@@ -1231,6 +1592,8 @@ function CompassRing({
             text={label}
             position={[x * (radius - 0.52), 0.32, z * (radius - 0.52)]}
             accent={index % 3 === 0 ? "#101820" : "#5b4212"}
+            boxed={false}
+            scale={[0.38, 0.14, 1]}
           />
         );
       })}
@@ -1250,6 +1613,8 @@ function CompassRing({
               text={formatDirectionLabel(sector.label)}
               position={[x * (radius + 0.38), 0.36, z * (radius + 0.38)]}
               accent={sector.active ? "#ff6b4a" : "#ffd166"}
+              boxed={false}
+              scale={[0.82, 0.26, 1]}
             />
           </group>
         );
@@ -1366,7 +1731,14 @@ export function ThreeSceneCanvas({
         visible={layers.airflow}
         controls={controls}
       />
-      <WallMeshes layout={layout} selectedWallId={selectedWallId} visible={layers.walls} onSelectWall={onSelectWall} />
+      <WallMeshes
+        layout={layout}
+        selectedWallId={selectedWallId}
+        visible={layers.walls}
+        opacity={controls.structureOpacity}
+        onSelectWall={onSelectWall}
+      />
+      <RoofMesh layout={layout} visible={layers.walls && controls.showRoof} opacity={controls.structureOpacity} />
       <OpeningMeshes layout={layout} />
       <DeviceMeshes layout={layout} />
 

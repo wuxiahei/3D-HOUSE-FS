@@ -19,16 +19,24 @@ export interface SimGrid {
 export interface HeatField {
   grid: SimGrid;
   temperature: Float32Array;
+  layers: Float32Array[];
+  layerHeights: number[];
+  thermalPlumes: { x: number; y: number; radius: number; strength: number; kind: "warm" | "cool" }[];
   min: number;
   max: number;
 }
 
 export interface FlowField {
   grid: SimGrid;
+  pressure: Float32Array;
   vx: Float32Array;
   vy: Float32Array;
+  verticalVelocity: Float32Array;
+  vorticity: Float32Array;
+  divergence: Float32Array;
   speedMax: number;
   inlets: { x: number; y: number; strength: number }[];
+  seedPoints: { x: number; y: number; strength: number }[];
   streamlines: { points: [number, number][]; speed: number }[];
 }
 

@@ -1,40 +1,34 @@
-import type { BaguaPalace, FengshuiAnalysis, HouseLayout } from "@fengshui/core";
+import type { BaguaPalace, BaguaSector, FengshuiAnalysis, HouseLayout } from "@fengshui/core";
 import { formatDirectionLabel } from "../../lib/editor";
 
-function buildCompassReading({
-  layout,
+function selectedSectorFor({
   fengshui,
   selectedRoomId,
   activePalace
 }: {
-  layout: HouseLayout;
   fengshui: FengshuiAnalysis;
   selectedRoomId: string | null;
   activePalace: BaguaPalace | null;
-}) {
+}): BaguaSector {
   const selectedMapping = selectedRoomId
     ? fengshui.roomPalaceMap.find((item) => item.roomId === selectedRoomId)
     : null;
-  const activeSector = activePalace
-    ? fengshui.bagua.find((sector) => sector.palace === activePalace)
-    : selectedMapping
-      ? fengshui.bagua.find((sector) => sector.palace === selectedMapping.palace)
-      : null;
-  const deviceText =
-    (layout.devices ?? []).length > 0
-      ? `已标注 ${(layout.devices ?? []).filter((device) => device.type === "ac").length} 个空调和 ${(layout.devices ?? []).filter((device) => device.type === "kitchen-heat").length} 个热源，可与热力图、气流图交叉观察。`
-      : "尚未标注空调或热源，热力和气流判断会更依赖门窗与传感点。";
+  const palace = activePalace ?? selectedMapping?.palace ?? "center";
+  return fengshui.bagua.find((sector) => sector.palace === palace) ?? fengshui.bagua[4];
+}
 
-  return [
-    `当前坐向约 ${layout.orientation.facingDegrees} 度（${formatDirectionLabel(layout.orientation.facingLabel)}），门向约 ${layout.orientation.frontDoorDegrees} 度（${formatDirectionLabel(layout.orientation.frontDoorLabel)}）。`,
-    selectedMapping
-      ? `${selectedMapping.roomName} 落在 ${selectedMapping.palaceLabel}，年星为 ${selectedMapping.annualStar}。`
-      : "选择房间后，可以查看该房间落入的宫位、年星和对应参考信息。",
-    activeSector
-      ? `${activeSector.label}：${activeSector.annualStarLabel}。${activeSector.annualStarMeaning}`
-      : "九宫区域会随选中房间同步高亮，便于把罗盘信息映射回 3D 户型。",
-    `当前识别 ${layout.openings.length} 个门窗开口。${deviceText}`
-  ];
+function roomsInSector(fengshui: FengshuiAnalysis, sector: BaguaSector) {
+  return fengshui.roomPalaceMap.filter((mapping) => mapping.palace === sector.palace);
+}
+
+function findingToneLabel(tone: string) {
+  if (tone === "attention") {
+    return "重点";
+  }
+  if (tone === "supportive") {
+    return "匹配";
+  }
+  return "参考";
 }
 
 export function FengshuiPanel({
@@ -53,40 +47,113 @@ export function FengshuiPanel({
   const selectedMapping = selectedRoomId
     ? fengshui.roomPalaceMap.find((item) => item.roomId === selectedRoomId)
     : null;
-  const reading = buildCompassReading({ layout, fengshui, selectedRoomId, activePalace });
+  const activeSector = selectedSectorFor({ fengshui, selectedRoomId, activePalace });
+  const sectorRooms = roomsInSector(fengshui, activeSector);
+  const relatedFindings = fengshui.findings.filter(
+    (finding) =>
+      finding.relatedPalace === activeSector.palace ||
+      finding.relatedRooms.some((roomId) => activeSector.roomIds.includes(roomId))
+  );
+  const deviceCount = (layout.devices ?? []).length;
+  const acCount = (layout.devices ?? []).filter((device) => device.type === "ac").length;
+  const heatSourceCount = (layout.devices ?? []).filter((device) => device.type === "kitchen-heat").length;
 
   return (
     <section className="dock-panel fengshui-dock">
       <div className="dock-title">
-        <strong>罗盘风水解读</strong>
-        <span>只给信息依据，不直接下结论</span>
+        <strong>罗盘风水盘</strong>
+        <span>方位依据，不作吉凶断语</span>
       </div>
-      <div className="dock-metrics">
-        <span>朝向 {layout.orientation.facingDegrees}度 / {formatDirectionLabel(layout.orientation.facingLabel)}</span>
-        <span>门向 {layout.orientation.frontDoorDegrees}度 / {formatDirectionLabel(layout.orientation.frontDoorLabel)}</span>
+
+      <div className="fengshui-summary-grid">
+        <div>
+          <span>房屋朝向</span>
+          <strong>
+            {layout.orientation.facingDegrees} 度 / {formatDirectionLabel(layout.orientation.facingLabel)}
+          </strong>
+        </div>
+        <div>
+          <span>入户门向</span>
+          <strong>
+            {layout.orientation.frontDoorDegrees} 度 / {formatDirectionLabel(layout.orientation.frontDoorLabel)}
+          </strong>
+        </div>
+        <div>
+          <span>环境开口</span>
+          <strong>{layout.openings.length} 个门窗</strong>
+        </div>
+        <div>
+          <span>冷热设备</span>
+          <strong>
+            {deviceCount} 个设备 / {acCount} 空调 / {heatSourceCount} 热源
+          </strong>
+        </div>
       </div>
-      <div className="compass-reading">
-        {reading.map((line) => (
-          <p key={line}>{line}</p>
-        ))}
+
+      <div className="fengshui-focus">
+        <div>
+          <span className="eyebrow">当前宫位</span>
+          <strong>{activeSector.label}</strong>
+          <p>
+            {activeSector.annualStarLabel}：{activeSector.annualStarMeaning}
+          </p>
+        </div>
+        <div className="fengshui-room-stack">
+          <span className="eyebrow">关联房间</span>
+          {sectorRooms.length > 0 ? (
+            sectorRooms.map((mapping) => (
+              <button key={mapping.roomId} type="button" onClick={() => onSelectRoom(mapping.roomId)}>
+                {mapping.roomName}
+              </button>
+            ))
+          ) : (
+            <span className="muted">该宫位暂无房间中心点落入</span>
+          )}
+        </div>
       </div>
+
       {selectedMapping ? (
         <div className="selected-summary">
-          {selectedMapping.roomName} 位于 {selectedMapping.palaceLabel}，年星 {selectedMapping.annualStar}
+          当前选中 {selectedMapping.roomName}，落在 {selectedMapping.palaceLabel}，年星 {selectedMapping.annualStar}。
         </div>
       ) : null}
+
+      <div className="fengshui-findings">
+        {relatedFindings.length > 0 ? (
+          relatedFindings.slice(0, 3).map((finding) => (
+            <article key={finding.id} className={`finding-card tone-${finding.tone}`}>
+              <span>{findingToneLabel(finding.tone)}</span>
+              <strong>{finding.title}</strong>
+              <p>{finding.basis}</p>
+              <p>{finding.reference}</p>
+            </article>
+          ))
+        ) : (
+          <article className="finding-card tone-neutral">
+            <span>参考</span>
+            <strong>{activeSector.label}</strong>
+            <p>{activeSector.reference}</p>
+          </article>
+        )}
+      </div>
+
       <div className="compact-bagua-grid">
-        {fengshui.bagua.map((sector) => (
-          <button
-            key={sector.palace}
-            type="button"
-            className={sector.palace === activePalace ? "active" : ""}
-            onClick={() => sector.roomIds[0] && onSelectRoom(sector.roomIds[0])}
-          >
-            <strong>{sector.label.replace("方", "")}</strong>
-            <span>{sector.annualStarLabel}</span>
-          </button>
-        ))}
+        {fengshui.bagua.map((sector) => {
+          const roomCount = sector.roomIds.length;
+          return (
+            <button
+              key={sector.palace}
+              type="button"
+              className={sector.palace === activeSector.palace ? "active" : ""}
+              onClick={() => sector.roomIds[0] && onSelectRoom(sector.roomIds[0])}
+              title={sector.reference}
+            >
+              <strong>{sector.label.replace("方", "")}</strong>
+              <span>{sector.annualStarLabel}</span>
+              <small>{roomCount > 0 ? `${roomCount} 房间` : "无房间"}</small>
+            </button>
+          );
+        })}
       </div>
     </section>
   );

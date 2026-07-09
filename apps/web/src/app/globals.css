@@ -601,6 +601,63 @@ textarea {
   margin-top: 10px;
 }
 
+.dock-note {
+  margin: 10px 0 0;
+  color: #b9c8c2;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.heat-room-list,
+.flow-room-list,
+.fengshui-findings {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.heat-room-row,
+.flow-room-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 0.9fr) minmax(120px, 2fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.heat-room-row strong,
+.flow-room-row strong {
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.flow-room-row small {
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.heat-room-track,
+.flow-room-track {
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.heat-room-track i,
+.flow-room-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.flow-room-track i {
+  background: linear-gradient(90deg, #1a80a8, #47d7ff, #d7fff7);
+}
+
 .compass-reading {
   display: grid;
   gap: 4px;
@@ -660,6 +717,116 @@ textarea {
 .compact-bagua-grid span {
   color: var(--muted);
   font-size: 11px;
+}
+
+.compact-bagua-grid small {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.fengshui-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.fengshui-summary-grid div,
+.fengshui-focus,
+.finding-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.fengshui-summary-grid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.fengshui-summary-grid span,
+.eyebrow {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.fengshui-summary-grid strong {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.fengshui-focus {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(160px, 0.9fr);
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.fengshui-focus strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--gold);
+}
+
+.fengshui-focus p,
+.finding-card p {
+  margin: 4px 0 0;
+  color: #cbd8d2;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.fengshui-room-stack {
+  display: flex;
+  align-content: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fengshui-room-stack .eyebrow {
+  flex-basis: 100%;
+}
+
+.fengshui-room-stack button {
+  min-height: 26px;
+  padding: 4px 8px;
+  color: #fff3c4;
+  font-size: 12px;
+}
+
+.finding-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+.finding-card > span {
+  justify-self: start;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #101515;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.finding-card strong {
+  font-size: 13px;
+}
+
+.finding-card.tone-attention > span {
+  background: var(--gold);
+}
+
+.finding-card.tone-supportive > span {
+  background: var(--green);
+}
+
+.finding-card.tone-neutral > span {
+  background: #9aa7a1;
 }
 
 .scene-label,
@@ -722,6 +889,10 @@ textarea {
     z-index: 10;
     box-shadow: var(--shadow);
   }
+
+  .fengshui-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -742,6 +913,25 @@ textarea {
   }
 
   .analysis-dock {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: stretch;
+  }
+
+  .heat-room-row,
+  .flow-room-row {
+    grid-template-columns: minmax(58px, 0.8fr) minmax(80px, 1fr) auto;
+  }
+
+  .flow-room-row small {
+    display: none;
+  }
+
+  .fengshui-summary-grid,
+  .fengshui-focus {
     grid-template-columns: 1fr;
   }
 
