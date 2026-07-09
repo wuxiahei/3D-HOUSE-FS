@@ -149,10 +149,12 @@ function buildHeatLayers(layout: HouseLayout, grid: SimGrid, baseTemperature: Fl
         const stableStratification = (heightRatio - 0.42) * 0.58;
         const buoyantStack = warmSource * (heightRatio - 0.32) * 0.48;
         const coolPool = coolSource * Math.max(0, 0.55 - heightRatio) * 0.42;
-        const deviceStack = (layout.devices ?? []).reduce(
-          (total, device) => total + layerDeviceInfluence(device, center.x, center.y, heightRatio),
-          0
-        );
+        const deviceStack = (layout.devices ?? []).reduce((total, device) => {
+          if (grid.roomIds[index] !== device.roomId) {
+            return total;
+          }
+          return total + layerDeviceInfluence(device, center.x, center.y, heightRatio);
+        }, 0);
 
         layer[index] = baseTemperature[index] + stableStratification + buoyantStack + coolPool + deviceStack;
       }

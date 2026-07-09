@@ -701,6 +701,129 @@ function HeatPlumes({ layout, field }: { layout: HouseLayout; field: HeatField }
   );
 }
 
+function sampleHeatLayer(field: HeatField, layer: Float32Array, x: number, y: number) {
+  const gx = (x - field.grid.originX) / field.grid.cellSize - 0.5;
+  const gy = (y - field.grid.originY) / field.grid.cellSize - 0.5;
+  const column0 = Math.floor(gx);
+  const row0 = Math.floor(gy);
+  const tx = gx - column0;
+  const ty = gy - row0;
+  let value = 0;
+  let totalWeight = 0;
+
+  for (let rowOffset = 0; rowOffset <= 1; rowOffset += 1) {
+    for (let columnOffset = 0; columnOffset <= 1; columnOffset += 1) {
+      const column = column0 + columnOffset;
+      const row = row0 + rowOffset;
+      if (column < 0 || column >= field.grid.cols || row < 0 || row >= field.grid.rows) {
+        continue;
+      }
+      const index = row * field.grid.cols + column;
+      if (!field.grid.interior[index]) {
+        continue;
+      }
+      const weight = (columnOffset === 0 ? 1 - tx : tx) * (rowOffset === 0 ? 1 - ty : ty);
+      value += layer[index] * weight;
+      totalWeight += weight;
+    }
+  }
+
+  return totalWeight > 0.0001 ? value / totalWeight : null;
+}
+
+function sampleHeatAtHeight(field: HeatField, x: number, y: number, height: number) {
+  const layers = field.layers.length > 0 ? field.layers : [field.temperature];
+  if (layers.length === 1) {
+    return sampleHeatLayer(field, layers[0], x, y);
+  }
+
+  const heights = field.layerHeights.length === layers.length ? field.layerHeights : layers.map((_, index) => index);
+  let upperIndex = heights.findIndex((layerHeight) => layerHeight >= height);
+  if (upperIndex < 0) {
+    upperIndex = layers.length - 1;
+  }
+  const lowerIndex = Math.max(0, upperIndex - 1);
+  const lowerHeight = heights[lowerIndex] ?? 0;
+  const upperHeight = heights[upperIndex] ?? lowerHeight + 1;
+  const lower = sampleHeatLayer(field, layers[lowerIndex], x, y);
+  const upper = sampleHeatLayer(field, layers[upperIndex], x, y);
+  if (lower === null && upper === null) {
+    return null;
+  }
+  if (lower === null) {
+    return upper;
+  }
+  if (upper === null) {
+    return lower;
+  }
+  const t = THREE.MathUtils.clamp((height - lowerHeight) / Math.max(0.001, upperHeight - lowerHeight), 0, 1);
+  return THREE.MathUtils.lerp(lower, upper, t);
+}
+
+function makeHeatSliceGeometry(layout: HouseLayout, field: HeatField, axis: "x" | "y") {
+  const horizontalSegments = 48;
+  const verticalSegments = 16;
+  const span = Math.max(0.001, field.max - field.min);
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  const color = new THREE.Color();
+
+  for (let row = 0; row <= verticalSegments; row += 1) {
+    const height = THREE.MathUtils.lerp(0.14, layout.bounds.height - 0.12, row / verticalSegments);
+    for (let column = 0; column <= horizontalSegments; column += 1) {
+      const ratio = column / horizontalSegments;
+      const x = axis === "x" ? layout.bounds.width * 0.5 : layout.bounds.width * ratio;
+      const y = axis === "x" ? layout.bounds.depth * ratio : layout.bounds.depth * 0.5;
+      const temperature = sampleHeatAtHeight(field, x, y, height);
+      const normalized = temperature === null ? 0 : THREE.MathUtils.clamp((temperature - field.min) / span, 0, 1);
+      color.copy(colorFromRamp(normalized));
+      positions.push(sceneX(layout, x), height, sceneZ(layout, y));
+      colors.push(color.r, color.g, color.b);
+    }
+  }
+
+  const rowWidth = horizontalSegments + 1;
+  for (let row = 0; row < verticalSegments; row += 1) {
+    for (let column = 0; column < horizontalSegments; column += 1) {
+      const a = row * rowWidth + column;
+      const b = a + 1;
+      const c = a + rowWidth;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  return geometry;
+}
+
+function HeatVerticalSlices({ layout, field }: { layout: HouseLayout; field: HeatField }) {
+  const geometries = useMemo(
+    () => [makeHeatSliceGeometry(layout, field, "x"), makeHeatSliceGeometry(layout, field, "y")],
+    [field, layout]
+  );
+
+  useEffect(() => {
+    return () => {
+      geometries.forEach((geometry) => geometry.dispose());
+    };
+  }, [geometries]);
+
+  return (
+    <>
+      {geometries.map((geometry, index) => (
+        <mesh key={`heat-slice-${index}`} geometry={geometry} raycast={noRaycast} renderOrder={4}>
+          <meshBasicMaterial vertexColors transparent opacity={0.36} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
 function HeatFieldOverlay({
   layout,
   field,
@@ -790,8 +913,8 @@ function HeatFieldOverlay({
           />
         </mesh>
       ))}
-      <HeatFieldColumns layout={layout} field={field} />
       <HeatPlumes layout={layout} field={field} />
+      <HeatVerticalSlices layout={layout} field={field} />
       {sensors.map((sensor) => (
         <group key={sensor.id} position={[sceneX(layout, sensor.x), 0.42, sceneZ(layout, sensor.y)]}>
           <mesh>
@@ -1133,7 +1256,7 @@ function makeAirflowGlyphGeometry(layout: HouseLayout, field: FlowField, selecte
       const vx = field.vx[index];
       const vy = field.vy[index];
       const speed = Math.hypot(vx, vy);
-      if (speed <= field.speedMax * 0.012) {
+      if (speed <= field.speedMax * 0.004) {
         continue;
       }
 
@@ -1310,7 +1433,7 @@ function WallMeshes({
         return (
           <mesh
             key={wall.id}
-            position={[sceneX(layout, center.x), 1.2, sceneZ(layout, center.y)]}
+            position={[sceneX(layout, center.x), layout.bounds.height / 2, sceneZ(layout, center.y)]}
             rotation={[0, -rotation, 0]}
             castShadow
             onClick={(event: ThreeEvent<MouseEvent>) => {
@@ -1318,7 +1441,7 @@ function WallMeshes({
               onSelectWall(wall.source === "custom" ? wall.id : null);
             }}
           >
-            <boxGeometry args={[length, 2.4, wall.thickness]} />
+            <boxGeometry args={[length, layout.bounds.height, wall.thickness]} />
             <meshStandardMaterial
               color={wall.source === "custom" ? "#536d88" : wall.exterior ? "#f7f9fb" : "#d9dee0"}
               emissive={isSelected ? "#2a9fd6" : "#000000"}
@@ -1347,13 +1470,16 @@ function RoofMesh({
     return null;
   }
 
-  const y = layout.bounds.height + 0.04;
+  const roofThickness = 0.12;
+  const overhang = 0.12;
+  const fasciaHeight = 0.34;
+  const y = layout.bounds.height + roofThickness / 2;
   const roofOpacity = Math.min(0.42, Math.max(0.16, opacity * 0.46));
 
   return (
     <group position={[0, y, 0]}>
       <mesh receiveShadow>
-        <boxGeometry args={[layout.bounds.width + 0.24, 0.08, layout.bounds.depth + 0.24]} />
+        <boxGeometry args={[layout.bounds.width + overhang * 2, roofThickness, layout.bounds.depth + overhang * 2]} />
         <meshStandardMaterial
           color="#d9edf0"
           emissive="#5fd8f2"
@@ -1364,12 +1490,23 @@ function RoofMesh({
           depthWrite={false}
         />
       </mesh>
+      {[
+        { position: [0, -fasciaHeight / 2, layout.bounds.depth / 2 + overhang] as [number, number, number], size: [layout.bounds.width + overhang * 2, fasciaHeight, 0.08] as [number, number, number] },
+        { position: [0, -fasciaHeight / 2, -layout.bounds.depth / 2 - overhang] as [number, number, number], size: [layout.bounds.width + overhang * 2, fasciaHeight, 0.08] as [number, number, number] },
+        { position: [layout.bounds.width / 2 + overhang, -fasciaHeight / 2, 0] as [number, number, number], size: [0.08, fasciaHeight, layout.bounds.depth + overhang * 2] as [number, number, number] },
+        { position: [-layout.bounds.width / 2 - overhang, -fasciaHeight / 2, 0] as [number, number, number], size: [0.08, fasciaHeight, layout.bounds.depth + overhang * 2] as [number, number, number] }
+      ].map((fascia, index) => (
+        <mesh key={`roof-fascia-${index}`} position={fascia.position} raycast={noRaycast}>
+          <boxGeometry args={fascia.size} />
+          <meshStandardMaterial color="#d9edf0" transparent opacity={Math.min(0.36, roofOpacity + 0.08)} depthWrite={false} roughness={0.5} />
+        </mesh>
+      ))}
       <mesh position={[0, 0.06, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[Math.max(layout.bounds.width, layout.bounds.depth) * 0.5, Math.max(layout.bounds.width, layout.bounds.depth) * 0.5 + 0.015, 96]} />
         <meshBasicMaterial color="#bff5ff" transparent opacity={0.28} depthWrite={false} />
       </mesh>
       <lineSegments>
-        <edgesGeometry args={[new THREE.BoxGeometry(layout.bounds.width + 0.24, 0.1, layout.bounds.depth + 0.24)]} />
+        <edgesGeometry args={[new THREE.BoxGeometry(layout.bounds.width + overhang * 2, roofThickness, layout.bounds.depth + overhang * 2)]} />
         <lineBasicMaterial color="#c9fbff" transparent opacity={0.5} />
       </lineSegments>
     </group>
@@ -1529,6 +1666,17 @@ const compassMountains = [
   "壬"
 ];
 
+const compassTrigrams = [
+  { trigram: "坎", star: "一", tone: "#65d6ff" },
+  { trigram: "艮", star: "八", tone: "#ffd166" },
+  { trigram: "震", star: "三", tone: "#71e59f" },
+  { trigram: "巽", star: "四", tone: "#8cebd0" },
+  { trigram: "离", star: "九", tone: "#ff795f" },
+  { trigram: "坤", star: "二", tone: "#e2c38d" },
+  { trigram: "兑", star: "七", tone: "#e7eef5" },
+  { trigram: "乾", star: "六", tone: "#d6c1ff" }
+];
+
 function CompassSectorBand({
   innerRadius,
   outerRadius,
@@ -1654,6 +1802,15 @@ function CompassRing({
         </mesh>
       ))}
 
+      {[0, Math.PI / 2].map((rotation, index) => (
+        <group key={`compass-cross-${index}`} rotation={[0, rotation, 0]}>
+          <mesh position={[0, 0.052, 0]} raycast={noRaycast}>
+            <boxGeometry args={[radius * 2.02, 0.018, 0.018]} />
+            <meshBasicMaterial color={index === 0 ? "#c62121" : "#202820"} transparent opacity={index === 0 ? 0.52 : 0.28} depthWrite={false} />
+          </mesh>
+        </group>
+      ))}
+
       {Array.from({ length: 72 }, (_, index) => {
         const angle = (index / 72) * Math.PI * 2 - Math.PI / 2;
         const x = Math.cos(angle);
@@ -1679,6 +1836,22 @@ function CompassRing({
             accent={index % 3 === 0 ? "#101820" : "#5b4212"}
             boxed={false}
             scale={[0.38, 0.14, 1]}
+          />
+        );
+      })}
+
+      {compassTrigrams.map((item, index) => {
+        const angle = (index / compassTrigrams.length) * Math.PI * 2 - Math.PI / 2;
+        const x = Math.cos(angle);
+        const z = Math.sin(angle);
+        return (
+          <LabelSprite
+            key={`${item.trigram}-${item.star}`}
+            text={`${item.trigram}${item.star}`}
+            position={[x * (radius - 1.22), 0.34, z * (radius - 1.22)]}
+            accent={item.tone}
+            boxed={false}
+            scale={[0.62, 0.2, 1]}
           />
         );
       })}
