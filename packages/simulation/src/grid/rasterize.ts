@@ -132,7 +132,7 @@ function faceConductance(
 }
 
 export function rasterizeLayout(layout: HouseLayout): SimGrid {
-  const cellSize = clamp(Math.max(layout.bounds.width, layout.bounds.depth) / 56, 0.1, 0.3);
+  const cellSize = clamp(Math.max(layout.bounds.width, layout.bounds.depth) / 96, 0.08, 0.2);
   const cols = Math.max(2, Math.ceil(layout.bounds.width / cellSize));
   const rows = Math.max(2, Math.ceil(layout.bounds.depth / cellSize));
   const count = cols * rows;

@@ -35,12 +35,11 @@ function heatColor(intensity: number) {
 }
 
 const heatStops = [
-  { at: 0, color: new THREE.Color("#1537c9") },
-  { at: 0.2, color: new THREE.Color("#00a6ff") },
-  { at: 0.42, color: new THREE.Color("#20d6a3") },
-  { at: 0.64, color: new THREE.Color("#f4e64a") },
-  { at: 0.82, color: new THREE.Color("#ff8b22") },
-  { at: 1, color: new THREE.Color("#e8202a") }
+  { at: 0, color: new THREE.Color("#163dff") },
+  { at: 0.22, color: new THREE.Color("#18a7ff") },
+  { at: 0.5, color: new THREE.Color("#eef6ff") },
+  { at: 0.74, color: new THREE.Color("#ff8a5b") },
+  { at: 1, color: new THREE.Color("#d7191c") }
 ];
 
 function colorFromRamp(intensity: number) {
@@ -565,17 +564,15 @@ const heatFragmentShader = `
   varying vec2 vUv;
 
   vec3 ramp(float t) {
-    vec3 c0 = vec3(0.055, 0.141, 0.612);
-    vec3 c1 = vec3(0.000, 0.620, 0.910);
-    vec3 c2 = vec3(0.070, 0.720, 0.520);
-    vec3 c3 = vec3(0.930, 0.800, 0.180);
-    vec3 c4 = vec3(0.950, 0.360, 0.120);
-    vec3 c5 = vec3(0.780, 0.065, 0.140);
-    if (t < 0.20) return mix(c0, c1, t / 0.20);
-    if (t < 0.42) return mix(c1, c2, (t - 0.20) / 0.22);
-    if (t < 0.64) return mix(c2, c3, (t - 0.42) / 0.22);
-    if (t < 0.84) return mix(c3, c4, (t - 0.64) / 0.20);
-    return mix(c4, c5, (t - 0.84) / 0.16);
+    vec3 c0 = vec3(0.086, 0.239, 1.000);
+    vec3 c1 = vec3(0.094, 0.655, 1.000);
+    vec3 c2 = vec3(0.933, 0.965, 1.000);
+    vec3 c3 = vec3(1.000, 0.541, 0.357);
+    vec3 c4 = vec3(0.843, 0.098, 0.110);
+    if (t < 0.22) return mix(c0, c1, t / 0.22);
+    if (t < 0.50) return mix(c1, c2, (t - 0.22) / 0.28);
+    if (t < 0.74) return mix(c2, c3, (t - 0.50) / 0.24);
+    return mix(c3, c4, (t - 0.74) / 0.26);
   }
 
   void main() {
@@ -1087,7 +1084,6 @@ function HeatFieldOverlay({
             </mesh>
           ))
         : null}
-      {controls.showHeatLayers ? <HeatFieldColumns layout={layout} field={field} /> : null}
       {controls.showHeatPlumes ? <HeatPlumes layout={layout} field={field} /> : null}
       {controls.showHeatSlices ? (
         <HeatVerticalSlices

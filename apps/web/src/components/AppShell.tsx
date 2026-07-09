@@ -11,7 +11,17 @@ import {
   validateLayout
 } from "@fengshui/core";
 import type { ClimateDevice, HouseLayout, LayoutPoint, Opening, SensorPoint, TemplateId } from "@fengshui/core";
-import { useMemo, useState } from "react";
+import type { ChangeEvent, CSSProperties, PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AI_SETTINGS_STORAGE_KEY,
+  DEFAULT_BROWSER_AI_CONFIG,
+  MAX_REFERENCE_IMAGES,
+  normalizeAiProviderMode,
+  normalizeBrowserAiConfig,
+  type AiProviderMode,
+  type BrowserAiConfig
+} from "../lib/ai-config";
 import type { EditorMode } from "../lib/editor";
 import { AirflowPanel } from "./Analysis/AirflowPanel";
 import { FengshuiPanel } from "./Analysis/FengshuiPanel";
@@ -23,6 +33,7 @@ import { SceneViewport } from "./Scene/SceneViewport";
 import { LayoutPersistencePanel } from "./Templates/LayoutPersistencePanel";
 import { TemplatePicker } from "./Templates/TemplatePicker";
 import { useSimulation } from "../simulation/useSimulation";
+import { stringifyLayout } from "../utils/serializers/layout-storage";
 
 export interface SceneLayers {
   heat: boolean;
@@ -77,11 +88,24 @@ interface AiLayoutResponse {
   layout?: HouseLayout;
   message?: string;
   rationale?: string;
+  tags?: string[];
+  confidence?: number;
   provider?: {
     name?: string;
     model?: string;
+    baseUrl?: string;
   };
 }
+
+interface ServerAiStatus {
+  tone: AiDraftStatusTone;
+  text: string;
+}
+
+const DOCK_HEIGHT_STORAGE_KEY = "3d-house-fs:dock-height";
+const DEFAULT_DOCK_HEIGHT = 180;
+const MIN_DOCK_HEIGHT = 120;
+const MAX_DOCK_HEIGHT_RATIO = 0.58;
 
 function cloneLayout(layout: HouseLayout): HouseLayout {
   return JSON.parse(JSON.stringify(layout)) as HouseLayout;
@@ -168,15 +192,29 @@ export function AppShell() {
   const [activeAnalysis, setActiveAnalysis] = useState<AnalysisLayer>("heat");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("properties");
   const [aiPrompt, setAiPrompt] = useState("做一个南向客厅、通风好、适合三口之家的住宅");
+  const [aiReferenceFiles, setAiReferenceFiles] = useState<File[]>([]);
   const [aiDraftPending, setAiDraftPending] = useState(false);
   const [aiDraftStatus, setAiDraftStatus] = useState<AiDraftStatus>({
     tone: "idle",
     text: "未配置 AI 时会自动使用本地规则生成草案。"
   });
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [aiSettingsLoaded, setAiSettingsLoaded] = useState(false);
+  const [aiProviderMode, setAiProviderMode] = useState<AiProviderMode>("browser");
+  const [browserAiConfig, setBrowserAiConfig] = useState<BrowserAiConfig>(DEFAULT_BROWSER_AI_CONFIG);
+  const [serverAiPassword, setServerAiPassword] = useState("");
+  const [serverAiStatusPending, setServerAiStatusPending] = useState(false);
+  const [serverAiStatus, setServerAiStatus] = useState<ServerAiStatus>({
+    tone: "idle",
+    text: "切换到服务器模式后，可先验证密码再生成。"
+  });
+  const [latestAiDraftLayout, setLatestAiDraftLayout] = useState<HouseLayout | null>(null);
+  const [dockHeight, setDockHeight] = useState(DEFAULT_DOCK_HEIGHT);
+  const dockResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const [analysisControls, setAnalysisControls] = useState<AnalysisControls>({
     showHeatLayers: true,
-    showHeatContours: true,
-    showHeatSlices: true,
+    showHeatContours: false,
+    showHeatSlices: false,
     showHeatFlux: true,
     showHeatPlumes: true,
     heatSliceMode: "both",
@@ -212,6 +250,75 @@ export function AppShell() {
     ? fengshui.roomPalaceMap.find((item) => item.roomId === selectedRoom.id)?.palace ?? null
     : null;
 
+  useEffect(() => {
+    const stored = window.localStorage.getItem(AI_SETTINGS_STORAGE_KEY);
+    if (!stored) {
+      setAiSettingsLoaded(true);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(stored) as {
+        mode?: unknown;
+        browserConfig?: unknown;
+      };
+      setAiProviderMode(normalizeAiProviderMode(parsed.mode));
+      setBrowserAiConfig(normalizeBrowserAiConfig(parsed.browserConfig));
+    } catch {
+      window.localStorage.removeItem(AI_SETTINGS_STORAGE_KEY);
+    } finally {
+      setAiSettingsLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(DOCK_HEIGHT_STORAGE_KEY);
+    if (!stored) {
+      const responsiveDefault =
+        window.innerWidth <= 760 ? 260 : window.innerWidth <= 1180 ? 220 : DEFAULT_DOCK_HEIGHT;
+      setDockHeight(clampDockHeight(responsiveDefault));
+      return;
+    }
+
+    const parsed = Number(stored);
+    if (Number.isFinite(parsed)) {
+      setDockHeight(clampDockHeight(parsed));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!aiSettingsLoaded) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      AI_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        mode: aiProviderMode,
+        browserConfig: browserAiConfig
+      })
+    );
+  }, [aiProviderMode, aiSettingsLoaded, browserAiConfig]);
+
+  useEffect(() => {
+    window.localStorage.setItem(DOCK_HEIGHT_STORAGE_KEY, String(Math.round(dockHeight)));
+  }, [dockHeight]);
+
+  useEffect(() => {
+    if (aiProviderMode !== "server") {
+      setServerAiStatus({
+        tone: "idle",
+        text: "当前使用浏览器本地 AI 配置，不需要服务器密码。"
+      });
+      return;
+    }
+
+    setServerAiStatus({
+      tone: "idle",
+      text: "切换到服务器模式后，可先验证密码再生成。"
+    });
+  }, [aiProviderMode]);
+
   function applyTemplate(templateId: TemplateId) {
     const nextLayout = createTemplateLayout(templateId);
     setLayout(nextLayout);
@@ -219,6 +326,40 @@ export function AppShell() {
     setSelectedWallId(null);
     setDraftWall(null);
     setEditorMode("select");
+  }
+
+  function clampDockHeight(value: number) {
+    const viewportHeight = typeof window === "undefined" ? 900 : window.innerHeight;
+    const maxHeight = Math.max(220, Math.round(viewportHeight * MAX_DOCK_HEIGHT_RATIO));
+    return Math.min(maxHeight, Math.max(MIN_DOCK_HEIGHT, Math.round(value)));
+  }
+
+  function beginDockResize(event: PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    dockResizeRef.current = {
+      startY: event.clientY,
+      startHeight: dockHeight
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveDockResize(event: PointerEvent<HTMLButtonElement>) {
+    if (!dockResizeRef.current) {
+      return;
+    }
+    const delta = dockResizeRef.current.startY - event.clientY;
+    setDockHeight(clampDockHeight(dockResizeRef.current.startHeight + delta));
+  }
+
+  function endDockResize(event: PointerEvent<HTMLButtonElement>) {
+    dockResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function resetDockHeight() {
+    setDockHeight(DEFAULT_DOCK_HEIGHT);
   }
 
   function templateFromPrompt(prompt: string): TemplateId {
@@ -241,34 +382,170 @@ export function AppShell() {
     setEditorMode("select");
   }
 
+  function rememberLatestAiDraft(nextLayout: HouseLayout) {
+    setLatestAiDraftLayout(cloneLayout(syncDerivedLayoutData(nextLayout)));
+  }
+
+  function updateBrowserAiConfigField<K extends keyof BrowserAiConfig>(key: K, value: BrowserAiConfig[K]) {
+    setBrowserAiConfig((current) => ({ ...current, [key]: value }));
+  }
+
+  function selectAiReferenceFiles(event: ChangeEvent<HTMLInputElement>) {
+    const incomingFiles = Array.from(event.target.files ?? []).filter((file) => file.type.startsWith("image/"));
+    event.target.value = "";
+
+    if (incomingFiles.length === 0) {
+      return;
+    }
+
+    setAiReferenceFiles((current) => {
+      const merged = [...current, ...incomingFiles].slice(0, MAX_REFERENCE_IMAGES);
+      if (current.length + incomingFiles.length > MAX_REFERENCE_IMAGES) {
+        setAiDraftStatus({
+          tone: "warning",
+          text: `最多上传 ${MAX_REFERENCE_IMAGES} 张参考图，其余图片已忽略。`
+        });
+      }
+      return merged;
+    });
+  }
+
+  function removeAiReferenceFile(index: number) {
+    setAiReferenceFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
+  }
+
+  function clearBrowserAiConfig() {
+    setBrowserAiConfig(DEFAULT_BROWSER_AI_CONFIG);
+    setAiDraftStatus({
+      tone: "idle",
+      text: "浏览器本地 AI 配置已清空，不会影响服务器端配置。"
+    });
+  }
+
   function generateLocalAiDraft(message: string, tone: AiDraftStatusTone = "warning") {
     const templateId = templateFromPrompt(aiPrompt);
     const nextLayout = syncDerivedLayoutData(createTemplateLayout(templateId));
-    applyAiDraftLayout({
+    const aiDraftLayout = {
       ...nextLayout,
       metadata: {
         ...nextLayout.metadata,
         projectName: `AI 草案 - ${nextLayout.metadata.projectName}`
       }
-    });
+    };
+    applyAiDraftLayout(aiDraftLayout);
+    rememberLatestAiDraft(aiDraftLayout);
     setAiDraftStatus({ tone, text: message });
+  }
+
+  async function verifyServerAiConfig() {
+    if (!serverAiPassword.trim()) {
+      setServerAiStatus({
+        tone: "warning",
+        text: "请先输入服务器密码，再验证内置 AI 配置。"
+      });
+      return;
+    }
+
+    setServerAiStatusPending(true);
+    setServerAiStatus({
+      tone: "loading",
+      text: "正在验证服务器内置 AI 配置..."
+    });
+
+    try {
+      const response = await fetch("/api/ai/server-config-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: serverAiPassword.trim() }),
+        cache: "no-store"
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        message?: string;
+        provider?: { model?: string; name?: string };
+      };
+
+      if (!response.ok || !payload.ok) {
+        setServerAiStatus({
+          tone: "error",
+          text: payload.message ?? "服务器内置 AI 验证失败。"
+        });
+        return;
+      }
+
+      const providerText = payload.provider?.model ? `（${payload.provider.model}）` : "";
+      setServerAiStatus({
+        tone: "success",
+        text: payload.message ?? `服务器内置 AI${providerText} 已验证通过。`
+      });
+    } catch (error) {
+      setServerAiStatus({
+        tone: "error",
+        text:
+          error instanceof Error
+            ? `服务器内置 AI 验证失败：${error.message}`
+            : "服务器内置 AI 验证失败。"
+      });
+    } finally {
+      setServerAiStatusPending(false);
+    }
+  }
+
+  function exportLatestAiDraft() {
+    if (!latestAiDraftLayout) {
+      setAiDraftStatus({
+        tone: "warning",
+        text: "还没有可导出的 AI 建模 JSON，请先生成一次草案。"
+      });
+      return;
+    }
+
+    const exportText = stringifyLayout(latestAiDraftLayout);
+    const blob = new Blob([exportText], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const safeName = (latestAiDraftLayout.metadata.projectName || "ai-draft")
+      .replace(/[\\/:*?\"<>|]+/g, "-")
+      .replace(/\s+/g, "-");
+    anchor.href = url;
+    anchor.download = `${safeName}-ai.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setAiDraftStatus({
+      tone: "success",
+      text: "最近一次 AI 建模 JSON 已导出。"
+    });
   }
 
   async function generateAiDraft() {
     const prompt = aiPrompt.trim();
-    if (!prompt) {
-      generateLocalAiDraft("需求为空，已使用本地默认草案。", "warning");
+    if (!prompt && aiReferenceFiles.length === 0) {
+      generateLocalAiDraft("请先输入客户需求，或上传草图 / 照片后再生成。", "warning");
       return;
     }
 
     setAiDraftPending(true);
-    setAiDraftStatus({ tone: "loading", text: "正在请求 AI 配置并生成草案..." });
+    setAiDraftStatus({
+      tone: "loading",
+      text:
+        aiReferenceFiles.length > 0
+          ? "正在结合文字与参考图片生成可编辑建模 JSON..."
+          : "正在根据客户描述生成可编辑建模 JSON..."
+    });
 
     try {
+      const formData = new FormData();
+      formData.append("prompt", prompt);
+      formData.append("providerMode", aiProviderMode);
+      formData.append("serverPassword", serverAiPassword.trim());
+      formData.append("browserConfig", JSON.stringify(browserAiConfig));
+      aiReferenceFiles.forEach((file) => {
+        formData.append("referenceImages", file);
+      });
+
       const response = await fetch("/api/ai/layout-from-text", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: formData,
         cache: "no-store"
       });
       const payload = (await response.json()) as AiLayoutResponse;
@@ -279,10 +556,11 @@ export function AppShell() {
       }
 
       applyAiDraftLayout(payload.layout);
+      rememberLatestAiDraft(payload.layout);
       const providerText = payload.provider?.model ? `（${payload.provider.model}）` : "";
       const sourceText =
         payload.source === "provider"
-          ? `AI 服务${providerText}已生成草案。`
+          ? `AI 服务${providerText}已生成建模 JSON。`
           : payload.source === "fallback"
             ? "AI 服务不可用，已回落本地规则。"
             : "未配置 AI 服务，已使用本地规则。";
@@ -290,6 +568,16 @@ export function AppShell() {
         tone: payload.source === "provider" ? "success" : payload.source === "fallback" ? "warning" : "idle",
         text: payload.rationale ? `${sourceText} ${payload.rationale}` : payload.message ?? sourceText
       });
+
+      if (aiProviderMode === "server") {
+        setServerAiStatus({
+          tone: payload.source === "provider" ? "success" : "warning",
+          text:
+            payload.source === "provider"
+              ? `服务器内置 AI${providerText} 已验证并成功生成。`
+              : payload.message ?? "服务器内置 AI 已通过鉴权，但本次生成回退到了本地规则。"
+        });
+      }
     } catch (error) {
       generateLocalAiDraft(
         error instanceof Error ? `AI 接口请求失败，已回落本地规则：${error.message}` : "AI 接口请求失败，已回落本地规则。",
@@ -484,9 +772,10 @@ export function AppShell() {
 
   const selectedRoomWalls = selectedRoom ? layout.walls.filter((wall) => wall.roomId === selectedRoom.id) : [];
   const quickOpeningWallId = selectedWallId ?? selectedRoomWalls[0]?.id ?? layout.walls[0]?.id ?? null;
+  const shellStyle = { "--dock-height": `${dockHeight}px` } as CSSProperties;
 
   return (
-    <main className="studio-shell">
+    <main className="studio-shell" style={shellStyle}>
       <header className="studio-topbar">
         <div className="brand-block">
           <strong>3D HOUSE FS</strong>
@@ -623,15 +912,45 @@ export function AppShell() {
       </div>
 
       <footer className={`analysis-dock active-${activeAnalysis} workspace-${workspaceMode}`}>
+        <button
+          type="button"
+          className="dock-resize-handle"
+          aria-label="调整底部功能区高度"
+          title="拖动调整底部功能区高度，双击恢复默认"
+          onPointerDown={beginDockResize}
+          onPointerMove={moveDockResize}
+          onPointerUp={endDockResize}
+          onPointerCancel={endDockResize}
+          onDoubleClick={resetDockHeight}
+        >
+          <span />
+        </button>
         <div className="dock-main">
           {workspaceMode === "modeling" ? (
             <ModelingPanel
               layout={layout}
               aiPrompt={aiPrompt}
+              aiReferenceFiles={aiReferenceFiles}
               aiDraftPending={aiDraftPending}
               aiDraftStatus={aiDraftStatus}
+              aiSettingsOpen={aiSettingsOpen}
+              aiProviderMode={aiProviderMode}
+              browserAiConfig={browserAiConfig}
+              serverAiPassword={serverAiPassword}
+              serverAiStatusPending={serverAiStatusPending}
+              serverAiStatus={serverAiStatus}
+              canExportAiDraft={latestAiDraftLayout !== null}
               onAiPromptChange={setAiPrompt}
+              onAiReferenceFilesSelect={selectAiReferenceFiles}
+              onAiReferenceFileRemove={removeAiReferenceFile}
               onGenerateAiDraft={generateAiDraft}
+              onExportAiDraft={exportLatestAiDraft}
+              onAiSettingsToggle={() => setAiSettingsOpen((current) => !current)}
+              onAiProviderModeChange={setAiProviderMode}
+              onBrowserAiConfigChange={updateBrowserAiConfigField}
+              onServerAiPasswordChange={setServerAiPassword}
+              onVerifyServerAiConfig={verifyServerAiConfig}
+              onClearBrowserAiConfig={clearBrowserAiConfig}
               onSelectTemplate={applyTemplate}
             />
           ) : null}
