@@ -164,6 +164,83 @@ function buildHeatLayers(layout: HouseLayout, grid: SimGrid, baseTemperature: Fl
   });
 }
 
+function computeHeatDiagnostics({
+  grid,
+  temperature,
+  layers,
+  sensorCount,
+  iterations,
+  residual,
+  coupledAirflow
+}: {
+  grid: SimGrid;
+  temperature: Float32Array;
+  layers: Float32Array[];
+  sensorCount: number;
+  iterations: number;
+  residual: number;
+  coupledAirflow: boolean;
+}): HeatField["diagnostics"] {
+  let cellCount = 0;
+  let temperatureTotal = 0;
+  let gradientTotal = 0;
+  let gradientCount = 0;
+  let peakGradient = 0;
+  let bottomTotal = 0;
+  let topTotal = 0;
+  const bottom = layers[0] ?? temperature;
+  const top = layers[layers.length - 1] ?? temperature;
+  const dx = Math.max(grid.cellSize, 0.001);
+
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let column = 0; column < grid.cols; column += 1) {
+      const index = gridIndex(grid, column, row);
+      if (!grid.interior[index]) {
+        continue;
+      }
+
+      cellCount += 1;
+      temperatureTotal += temperature[index];
+      bottomTotal += bottom[index];
+      topTotal += top[index];
+
+      const west = column > 0 ? gridIndex(grid, column - 1, row) : index;
+      const east = column < grid.cols - 1 ? gridIndex(grid, column + 1, row) : index;
+      const north = row > 0 ? gridIndex(grid, column, row - 1) : index;
+      const south = row < grid.rows - 1 ? gridIndex(grid, column, row + 1) : index;
+      const gx =
+        grid.interior[east] && grid.interior[west]
+          ? (temperature[east] - temperature[west]) / (dx * (east === west ? 1 : 2))
+          : 0;
+      const gy =
+        grid.interior[south] && grid.interior[north]
+          ? (temperature[south] - temperature[north]) / (dx * (south === north ? 1 : 2))
+          : 0;
+      const gradient = Math.hypot(gx, gy);
+      if (gradient > 0) {
+        gradientTotal += gradient;
+        gradientCount += 1;
+        peakGradient = Math.max(peakGradient, gradient);
+      }
+    }
+  }
+
+  const meanTemperature = cellCount > 0 ? temperatureTotal / cellCount : 0;
+  const verticalStratification = cellCount > 0 ? (topTotal - bottomTotal) / cellCount : 0;
+
+  return {
+    iterations,
+    residual: Number((Number.isFinite(residual) ? residual : 0).toFixed(4)),
+    meanTemperature: Number(meanTemperature.toFixed(2)),
+    meanGradient: Number((gradientCount > 0 ? gradientTotal / gradientCount : 0).toFixed(3)),
+    peakGradient: Number(peakGradient.toFixed(3)),
+    verticalStratification: Number(verticalStratification.toFixed(2)),
+    sensorCount,
+    layerCount: layers.length,
+    coupledAirflow
+  };
+}
+
 function initialTemperature(layout: HouseLayout, grid: SimGrid, constraints: ReturnType<typeof sensorConstraints>) {
   const temperature = new Float32Array(grid.cols * grid.rows);
   const sensorAverage =
@@ -238,6 +315,8 @@ export function solveHeat(layout: HouseLayout, options: HeatSolveOptions = {}): 
   const epsilon = options.epsilon ?? 0.006;
   const outdoor = layout.weather.outdoorTemperature;
   const flow = matchingFlow(grid, options.airflow);
+  let residual = Number.POSITIVE_INFINITY;
+  let completedIterations = 0;
 
   for (let iteration = 0; iteration < iterations; iteration += 1) {
     let deltaMax = 0;
@@ -302,6 +381,8 @@ export function solveHeat(layout: HouseLayout, options: HeatSolveOptions = {}): 
     const swap = current;
     current = next;
     next = swap;
+    residual = deltaMax;
+    completedIterations = iteration + 1;
 
     if (deltaMax < epsilon) {
       break;
@@ -328,6 +409,15 @@ export function solveHeat(layout: HouseLayout, options: HeatSolveOptions = {}): 
     layerHeights: HEAT_LAYER_HEIGHTS.map((heightRatio) => heightRatio * layout.bounds.height),
     thermalPlumes: thermalPlumes(layout),
     min: Number.isFinite(min) ? min : outdoor,
-    max: Number.isFinite(max) ? max : outdoor
+    max: Number.isFinite(max) ? max : outdoor,
+    diagnostics: computeHeatDiagnostics({
+      grid,
+      temperature: current,
+      layers,
+      sensorCount: layout.sensors.length,
+      iterations: completedIterations,
+      residual,
+      coupledAirflow: Boolean(flow)
+    })
   };
 }

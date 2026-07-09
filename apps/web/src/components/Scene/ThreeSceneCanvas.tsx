@@ -1066,35 +1066,40 @@ function HeatFieldOverlay({
 
   return (
     <>
-      {renderLayers.map((layer, index) => (
-        <mesh
-          key={layer.id}
-          position={[0, layer.y, 0]}
-          rotation={[-Math.PI / 2, 0, 0]}
-          scale={[layer.scale, layer.scale, 1]}
-          raycast={noRaycast}
-        >
-          <planeGeometry args={[layout.bounds.width, layout.bounds.depth, 1, 1]} />
-          <shaderMaterial
-            vertexShader={heatVertexShader}
-            fragmentShader={heatFragmentShader}
-            uniforms={uniforms[index]}
-            transparent
-            depthWrite={false}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      ))}
-      <HeatPlumes layout={layout} field={field} />
-      <HeatVerticalSlices
-        layout={layout}
-        field={field}
-        mode={controls.heatSliceMode}
-        sliceX={controls.heatSliceX}
-        sliceY={controls.heatSliceY}
-      />
-      <HeatContourLayer layout={layout} field={field} />
-      <HeatFluxLayer layout={layout} field={field} />
+      {controls.showHeatLayers
+        ? renderLayers.map((layer, index) => (
+            <mesh
+              key={layer.id}
+              position={[0, layer.y, 0]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              scale={[layer.scale, layer.scale, 1]}
+              raycast={noRaycast}
+            >
+              <planeGeometry args={[layout.bounds.width, layout.bounds.depth, 1, 1]} />
+              <shaderMaterial
+                vertexShader={heatVertexShader}
+                fragmentShader={heatFragmentShader}
+                uniforms={uniforms[index]}
+                transparent
+                depthWrite={false}
+                side={THREE.DoubleSide}
+              />
+            </mesh>
+          ))
+        : null}
+      {controls.showHeatLayers ? <HeatFieldColumns layout={layout} field={field} /> : null}
+      {controls.showHeatPlumes ? <HeatPlumes layout={layout} field={field} /> : null}
+      {controls.showHeatSlices ? (
+        <HeatVerticalSlices
+          layout={layout}
+          field={field}
+          mode={controls.heatSliceMode}
+          sliceX={controls.heatSliceX}
+          sliceY={controls.heatSliceY}
+        />
+      ) : null}
+      {controls.showHeatContours ? <HeatContourLayer layout={layout} field={field} /> : null}
+      {controls.showHeatFlux ? <HeatFluxLayer layout={layout} field={field} /> : null}
       {sensors.map((sensor) => (
         <group key={sensor.id} position={[sceneX(layout, sensor.x), 0.42, sceneZ(layout, sensor.y)]}>
           <mesh>
@@ -1588,7 +1593,7 @@ function makeAirPathlineGeometry(layout: HouseLayout, field: FlowField, selected
   const positions: number[] = [];
   const colors: number[] = [];
   const color = new THREE.Color();
-  const seeds = field.seedPoints.slice(0, 180);
+  const seeds = field.seedPoints.slice(0, 260);
 
   for (const seed of seeds) {
     let x = seed.x;
@@ -1743,21 +1748,23 @@ function AirflowFieldOverlay({
 
   return (
     <>
-      <AirPressureLayer layout={layout} field={field} />
+      {controls.showAirPressure ? <AirPressureLayer layout={layout} field={field} /> : null}
       {controls.showAirDeadZones ? (
         <AirDeadZoneLayer layout={layout} field={field} threshold={controls.airDeadZoneThreshold} />
       ) : null}
-      <AirPathlineLayer layout={layout} field={field} selectedRoomId={selectedRoomId} />
-      <AirflowGlyphLayer layout={layout} field={field} selectedRoomId={selectedRoomId} />
-      <AirflowParticles
-        layout={layout}
-        field={field}
-        selectedRoomId={selectedRoomId}
-        density={controls.airflowParticleDensity}
-        speedScale={controls.airflowParticleSpeed}
-        animate={controls.animateAirflow}
-      />
-      {field.streamlines.map((streamline, index) => {
+      {controls.showAirPathlines ? <AirPathlineLayer layout={layout} field={field} selectedRoomId={selectedRoomId} /> : null}
+      {controls.showAirGlyphs ? <AirflowGlyphLayer layout={layout} field={field} selectedRoomId={selectedRoomId} /> : null}
+      {controls.showAirParticles ? (
+        <AirflowParticles
+          layout={layout}
+          field={field}
+          selectedRoomId={selectedRoomId}
+          density={controls.airflowParticleDensity}
+          speedScale={controls.airflowParticleSpeed}
+          animate={controls.animateAirflow}
+        />
+      ) : null}
+      {controls.showAirPathlines ? field.streamlines.map((streamline, index) => {
         const speedNorm = Math.min(1, streamline.speed / Math.max(0.001, field.speedMax));
         const selected =
           selectedRoomId &&
@@ -1783,7 +1790,7 @@ function AirflowFieldOverlay({
             <AirflowArrowHead position={end.clone().setY(end.y + 0.04)} direction={direction} color={color} scale={0.7 + speedNorm * 0.45} />
           </group>
         );
-      })}
+      }) : null}
       {field.inlets.slice(0, 14).map((inlet, index) => {
         const velocity = sampleFlowField(field, inlet.x, inlet.y);
         const direction = new THREE.Vector3(velocity.x, 0, velocity.y);

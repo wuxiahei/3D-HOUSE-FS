@@ -94,7 +94,7 @@ textarea {
 
 .studio-topbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto auto;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto auto;
   align-items: center;
   gap: var(--space-3);
   height: 52px;
@@ -123,6 +123,7 @@ textarea {
 }
 
 .mode-strip,
+.workspace-switch,
 .layer-strip,
 .segmented,
 .tool-row,
@@ -133,6 +134,7 @@ textarea {
 }
 
 .mode-strip button,
+.workspace-switch button,
 .layer-strip button,
 .segmented button,
 .tool-row button,
@@ -144,6 +146,7 @@ textarea {
 }
 
 .mode-strip button.active,
+.workspace-switch button.active,
 .layer-strip button.active,
 .segmented button.active,
 .aux-layer-toggle.active {
@@ -161,6 +164,14 @@ textarea {
 
 .analysis-switch button.current {
   box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.workspace-switch {
+  flex-wrap: nowrap;
+}
+
+.workspace-switch button {
+  white-space: nowrap;
 }
 
 .analysis-switch svg,
@@ -529,9 +540,10 @@ textarea {
 
 .analysis-controls {
   display: grid;
-  align-content: center;
+  align-content: start;
   gap: 10px;
   min-width: 0;
+  overflow: auto;
   padding: 12px 14px;
   background: #141b1d;
 }
@@ -593,12 +605,147 @@ textarea {
   line-height: 1.4;
 }
 
+.modeling-grid,
+.report-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.modeling-grid {
+  grid-template-columns: minmax(260px, 1.45fr) minmax(210px, 1fr) minmax(210px, 1fr);
+}
+
+.report-grid {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.modeling-block,
+.report-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 86px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.modeling-block strong,
+.report-card strong {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.modeling-block p,
+.report-card p {
+  margin: 0;
+  color: #cbd8d2;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.report-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 16px;
+  color: #cbd8d2;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.modeling-block textarea {
+  min-height: 64px;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.modeling-block > button {
+  justify-self: start;
+  min-height: 30px;
+  padding: 5px 10px;
+}
+
+.ai-draft-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ai-draft-status.tone-loading {
+  color: #9af8ff;
+}
+
+.ai-draft-status.tone-success {
+  color: var(--green);
+}
+
+.ai-draft-status.tone-warning {
+  color: var(--gold);
+}
+
+.ai-draft-status.tone-error {
+  color: #ff8a75;
+}
+
+.template-chip-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.template-chip-row button {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.template-chip-row button.active {
+  border-color: var(--green);
+  background: rgba(40, 215, 167, 0.14);
+}
+
 .dock-metrics,
 .flow-strip {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 10px;
+}
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(92px, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.diagnostic-chip {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.diagnostic-chip small {
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.diagnostic-chip strong {
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .dock-note {
@@ -633,6 +780,7 @@ textarea {
   white-space: nowrap;
 }
 
+.heat-room-row small,
 .flow-room-row small {
   color: var(--faint);
   white-space: nowrap;
@@ -893,6 +1041,12 @@ textarea {
   .fengshui-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .modeling-grid,
+  .report-grid,
+  .diagnostic-grid {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -908,8 +1062,14 @@ textarea {
   }
 
   .layer-strip,
+  .aux-layer-toggle,
   .status-pill {
     display: none;
+  }
+
+  .workspace-switch {
+    overflow-x: auto;
+    padding-bottom: 2px;
   }
 
   .analysis-dock {
@@ -926,12 +1086,16 @@ textarea {
     grid-template-columns: minmax(58px, 0.8fr) minmax(80px, 1fr) auto;
   }
 
+  .heat-room-row small,
   .flow-room-row small {
     display: none;
   }
 
   .fengshui-summary-grid,
-  .fengshui-focus {
+  .fengshui-focus,
+  .modeling-grid,
+  .report-grid,
+  .diagnostic-grid {
     grid-template-columns: 1fr;
   }
 

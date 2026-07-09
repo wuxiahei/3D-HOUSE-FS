@@ -16,6 +16,8 @@ import type { EditorMode } from "../lib/editor";
 import { AirflowPanel } from "./Analysis/AirflowPanel";
 import { FengshuiPanel } from "./Analysis/FengshuiPanel";
 import { HeatmapPanel } from "./Analysis/HeatmapPanel";
+import { ModelingPanel } from "./Analysis/ModelingPanel";
+import { RenovationReportPanel } from "./Analysis/RenovationReportPanel";
 import { LayoutEditor } from "./Editor/LayoutEditor";
 import { SceneViewport } from "./Scene/SceneViewport";
 import { LayoutPersistencePanel } from "./Templates/LayoutPersistencePanel";
@@ -30,12 +32,21 @@ export interface SceneLayers {
 }
 
 export type AnalysisLayer = "heat" | "airflow" | "fengshui";
+type WorkspaceMode = "modeling" | "analysis" | "renovation";
 
 export interface AnalysisControls {
+  showHeatLayers: boolean;
   showHeatContours: boolean;
+  showHeatSlices: boolean;
+  showHeatFlux: boolean;
+  showHeatPlumes: boolean;
   heatSliceMode: "both" | "x" | "y";
   heatSliceX: number;
   heatSliceY: number;
+  showAirPressure: boolean;
+  showAirPathlines: boolean;
+  showAirGlyphs: boolean;
+  showAirParticles: boolean;
   animateAirflow: boolean;
   airflowParticleDensity: number;
   airflowParticleSpeed: number;
@@ -51,6 +62,25 @@ type InspectorTab = "properties" | "files" | "templates";
 interface DraftWall {
   start: LayoutPoint;
   end: LayoutPoint;
+}
+
+type AiDraftStatusTone = "idle" | "loading" | "success" | "warning" | "error";
+
+interface AiDraftStatus {
+  tone: AiDraftStatusTone;
+  text: string;
+}
+
+interface AiLayoutResponse {
+  source?: "provider" | "local" | "fallback";
+  configured?: boolean;
+  layout?: HouseLayout;
+  message?: string;
+  rationale?: string;
+  provider?: {
+    name?: string;
+    model?: string;
+  };
 }
 
 function cloneLayout(layout: HouseLayout): HouseLayout {
@@ -134,13 +164,28 @@ export function AppShell() {
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("select");
   const [draftWall, setDraftWall] = useState<DraftWall | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("modeling");
   const [activeAnalysis, setActiveAnalysis] = useState<AnalysisLayer>("heat");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("properties");
+  const [aiPrompt, setAiPrompt] = useState("做一个南向客厅、通风好、适合三口之家的住宅");
+  const [aiDraftPending, setAiDraftPending] = useState(false);
+  const [aiDraftStatus, setAiDraftStatus] = useState<AiDraftStatus>({
+    tone: "idle",
+    text: "未配置 AI 时会自动使用本地规则生成草案。"
+  });
   const [analysisControls, setAnalysisControls] = useState<AnalysisControls>({
+    showHeatLayers: true,
     showHeatContours: true,
+    showHeatSlices: true,
+    showHeatFlux: true,
+    showHeatPlumes: true,
     heatSliceMode: "both",
     heatSliceX: 0.5,
     heatSliceY: 0.5,
+    showAirPressure: true,
+    showAirPathlines: true,
+    showAirGlyphs: true,
+    showAirParticles: true,
     animateAirflow: true,
     airflowParticleDensity: 0.68,
     airflowParticleSpeed: 1.25,
@@ -174,6 +219,85 @@ export function AppShell() {
     setSelectedWallId(null);
     setDraftWall(null);
     setEditorMode("select");
+  }
+
+  function templateFromPrompt(prompt: string): TemplateId {
+    const normalized = prompt.toLowerCase();
+    if (normalized.includes("三") || normalized.includes("3") || normalized.includes("家庭") || normalized.includes("老人") || normalized.includes("孩子")) {
+      return "family-three-room";
+    }
+    if (normalized.includes("空白") || normalized.includes("自定义")) {
+      return "blank";
+    }
+    return "compact-two-room";
+  }
+
+  function applyAiDraftLayout(nextLayout: HouseLayout) {
+    const syncedLayout = syncDerivedLayoutData(nextLayout);
+    setLayout(syncedLayout);
+    setSelectedRoomId(syncedLayout.rooms[0]?.id ?? null);
+    setSelectedWallId(null);
+    setDraftWall(null);
+    setEditorMode("select");
+  }
+
+  function generateLocalAiDraft(message: string, tone: AiDraftStatusTone = "warning") {
+    const templateId = templateFromPrompt(aiPrompt);
+    const nextLayout = syncDerivedLayoutData(createTemplateLayout(templateId));
+    applyAiDraftLayout({
+      ...nextLayout,
+      metadata: {
+        ...nextLayout.metadata,
+        projectName: `AI 草案 - ${nextLayout.metadata.projectName}`
+      }
+    });
+    setAiDraftStatus({ tone, text: message });
+  }
+
+  async function generateAiDraft() {
+    const prompt = aiPrompt.trim();
+    if (!prompt) {
+      generateLocalAiDraft("需求为空，已使用本地默认草案。", "warning");
+      return;
+    }
+
+    setAiDraftPending(true);
+    setAiDraftStatus({ tone: "loading", text: "正在请求 AI 配置并生成草案..." });
+
+    try {
+      const response = await fetch("/api/ai/layout-from-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+        cache: "no-store"
+      });
+      const payload = (await response.json()) as AiLayoutResponse;
+
+      if (!response.ok || !payload.layout) {
+        generateLocalAiDraft(payload.message ?? "AI 接口返回异常，已回落本地规则。", "warning");
+        return;
+      }
+
+      applyAiDraftLayout(payload.layout);
+      const providerText = payload.provider?.model ? `（${payload.provider.model}）` : "";
+      const sourceText =
+        payload.source === "provider"
+          ? `AI 服务${providerText}已生成草案。`
+          : payload.source === "fallback"
+            ? "AI 服务不可用，已回落本地规则。"
+            : "未配置 AI 服务，已使用本地规则。";
+      setAiDraftStatus({
+        tone: payload.source === "provider" ? "success" : payload.source === "fallback" ? "warning" : "idle",
+        text: payload.rationale ? `${sourceText} ${payload.rationale}` : payload.message ?? sourceText
+      });
+    } catch (error) {
+      generateLocalAiDraft(
+        error instanceof Error ? `AI 接口请求失败，已回落本地规则：${error.message}` : "AI 接口请求失败，已回落本地规则。",
+        "error"
+      );
+    } finally {
+      setAiDraftPending(false);
+    }
   }
 
   function restoreLayout(nextLayout: HouseLayout) {
@@ -350,6 +474,7 @@ export function AppShell() {
     setLayers((current) => ({ ...current, [key]: !current[key] }));
     if (key === "heat" || key === "airflow" || key === "fengshui") {
       setActiveAnalysis(key);
+      setWorkspaceMode("analysis");
     }
   }
 
@@ -366,6 +491,22 @@ export function AppShell() {
         <div className="brand-block">
           <strong>3D HOUSE FS</strong>
           <span>{layout.metadata.projectName}</span>
+        </div>
+        <div className="workspace-switch" aria-label="workspace mode">
+          {[
+            ["modeling", "建模"],
+            ["analysis", "专业分析"],
+            ["renovation", "装修报告"]
+          ].map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              className={workspaceMode === mode ? "active" : ""}
+              onClick={() => setWorkspaceMode(mode as WorkspaceMode)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         <div className="layer-strip analysis-switch" aria-label="analysis layers">
           {[
@@ -481,43 +622,74 @@ export function AppShell() {
         </aside>
       </div>
 
-      <footer className={`analysis-dock active-${activeAnalysis}`}>
+      <footer className={`analysis-dock active-${activeAnalysis} workspace-${workspaceMode}`}>
         <div className="dock-main">
-          {activeAnalysis === "heat" ? <HeatmapPanel heatmap={heatmap} sensors={layout.sensors} field={simulation.heatField} /> : null}
-          {activeAnalysis === "airflow" ? <AirflowPanel airflow={airflow} rooms={layout.rooms} field={simulation.flowField} /> : null}
-          {activeAnalysis === "fengshui" ? (
-            <FengshuiPanel
+          {workspaceMode === "modeling" ? (
+            <ModelingPanel
               layout={layout}
-              fengshui={fengshui}
-              selectedRoomId={selectedRoom?.id ?? null}
-              activePalace={activePalace}
-              onSelectRoom={selectRoom}
+              aiPrompt={aiPrompt}
+              aiDraftPending={aiDraftPending}
+              aiDraftStatus={aiDraftStatus}
+              onAiPromptChange={setAiPrompt}
+              onGenerateAiDraft={generateAiDraft}
+              onSelectTemplate={applyTemplate}
             />
           ) : null}
+          {workspaceMode === "analysis" && activeAnalysis === "heat" ? <HeatmapPanel heatmap={heatmap} sensors={layout.sensors} field={simulation.heatField} /> : null}
+          {workspaceMode === "analysis" && activeAnalysis === "airflow" ? <AirflowPanel airflow={airflow} rooms={layout.rooms} field={simulation.flowField} /> : null}
+          {workspaceMode === "analysis" && activeAnalysis === "fengshui" ? (
+            <FengshuiPanel layout={layout} fengshui={fengshui} selectedRoomId={selectedRoom?.id ?? null} activePalace={activePalace} onSelectRoom={selectRoom} />
+          ) : null}
+          {workspaceMode === "renovation" ? <RenovationReportPanel layout={layout} heatmap={heatmap} airflow={airflow} /> : null}
         </div>
         <div className="analysis-controls">
-          {activeAnalysis === "heat" ? (
+          {workspaceMode === "modeling" ? (
             <>
+              <div className="legend-note">建模模式可以使用 AI 草案、模板或左侧工具手动编辑；3D 模型会保持为同一项目主体。</div>
+            </>
+          ) : null}
+          {workspaceMode === "analysis" && activeAnalysis === "heat" ? (
+            <>
+              <label className="toggle-field">
+                <input type="checkbox" checked={analysisControls.showHeatLayers} onChange={(event) => updateAnalysisControl("showHeatLayers", event.target.checked)} />
+                <span>3D 温度层</span>
+              </label>
               <label className="toggle-field">
                 <input type="checkbox" checked={analysisControls.showHeatContours} onChange={(event) => updateAnalysisControl("showHeatContours", event.target.checked)} />
                 <span>等温线</span>
               </label>
-              <label className="range-field">
-                <span>剖面方向</span>
-                <select value={analysisControls.heatSliceMode} onChange={(event) => updateAnalysisControl("heatSliceMode", event.target.value as AnalysisControls["heatSliceMode"])}>
-                  <option value="both">双向</option>
-                  <option value="x">横剖</option>
-                  <option value="y">纵剖</option>
-                </select>
+              <label className="toggle-field">
+                <input type="checkbox" checked={analysisControls.showHeatSlices} onChange={(event) => updateAnalysisControl("showHeatSlices", event.target.checked)} />
+                <span>剖切面</span>
               </label>
-              <label className="range-field">
-                <span>横剖位置</span>
-                <input type="range" min={0.08} max={0.92} step={0.02} value={analysisControls.heatSliceX} onChange={(event) => updateAnalysisControl("heatSliceX", Number(event.target.value))} />
+              <label className="toggle-field">
+                <input type="checkbox" checked={analysisControls.showHeatFlux} onChange={(event) => updateAnalysisControl("showHeatFlux", event.target.checked)} />
+                <span>热通量线</span>
               </label>
-              <label className="range-field">
-                <span>纵剖位置</span>
-                <input type="range" min={0.08} max={0.92} step={0.02} value={analysisControls.heatSliceY} onChange={(event) => updateAnalysisControl("heatSliceY", Number(event.target.value))} />
+              <label className="toggle-field">
+                <input type="checkbox" checked={analysisControls.showHeatPlumes} onChange={(event) => updateAnalysisControl("showHeatPlumes", event.target.checked)} />
+                <span>冷热羽流</span>
               </label>
+              {analysisControls.showHeatSlices ? (
+                <>
+                  <label className="range-field">
+                    <span>剖面方向</span>
+                    <select value={analysisControls.heatSliceMode} onChange={(event) => updateAnalysisControl("heatSliceMode", event.target.value as AnalysisControls["heatSliceMode"])}>
+                      <option value="both">双向</option>
+                      <option value="x">横剖</option>
+                      <option value="y">纵剖</option>
+                    </select>
+                  </label>
+                  <label className="range-field">
+                    <span>横剖位置</span>
+                    <input type="range" min={0.08} max={0.92} step={0.02} value={analysisControls.heatSliceX} onChange={(event) => updateAnalysisControl("heatSliceX", Number(event.target.value))} />
+                  </label>
+                  <label className="range-field">
+                    <span>纵剖位置</span>
+                    <input type="range" min={0.08} max={0.92} step={0.02} value={analysisControls.heatSliceY} onChange={(event) => updateAnalysisControl("heatSliceY", Number(event.target.value))} />
+                  </label>
+                </>
+              ) : null}
               <div className="legend-bar heat-legend" aria-hidden="true" />
               <div className="legend-readout">
                 <span>{simulation.heatField.min.toFixed(1)} C</span>
@@ -526,8 +698,24 @@ export function AppShell() {
               </div>
             </>
           ) : null}
-          {activeAnalysis === "airflow" ? (
+          {workspaceMode === "analysis" && activeAnalysis === "airflow" ? (
             <>
+              <label className="toggle-field">
+                <input type="checkbox" checked={analysisControls.showAirPressure} onChange={(event) => updateAnalysisControl("showAirPressure", event.target.checked)} />
+                <span>压力底图</span>
+              </label>
+              <label className="toggle-field">
+                <input type="checkbox" checked={analysisControls.showAirPathlines} onChange={(event) => updateAnalysisControl("showAirPathlines", event.target.checked)} />
+                <span>路径线</span>
+              </label>
+              <label className="toggle-field">
+                <input type="checkbox" checked={analysisControls.showAirGlyphs} onChange={(event) => updateAnalysisControl("showAirGlyphs", event.target.checked)} />
+                <span>速度矢量</span>
+              </label>
+              <label className="toggle-field">
+                <input type="checkbox" checked={analysisControls.showAirParticles} onChange={(event) => updateAnalysisControl("showAirParticles", event.target.checked)} />
+                <span>粒子场</span>
+              </label>
               <label className="toggle-field">
                 <input type="checkbox" checked={analysisControls.animateAirflow} onChange={(event) => updateAnalysisControl("animateAirflow", event.target.checked)} />
                 <span>动画</span>
@@ -552,7 +740,7 @@ export function AppShell() {
               <span className="legend-note">{simulation.flowField.streamlines.length} 条路径 / {simulation.flowField.seedPoints.length} 个种子</span>
             </>
           ) : null}
-          {activeAnalysis === "fengshui" ? (
+          {workspaceMode === "analysis" && activeAnalysis === "fengshui" ? (
             <>
               <label className="range-field">
                 <span>罗盘模式</span>
@@ -563,6 +751,9 @@ export function AppShell() {
               </label>
               <div className="legend-note">简洁模式保留方向和双针；专业模式显示 24 山、八卦、九星和基准线。</div>
             </>
+          ) : null}
+          {workspaceMode === "renovation" ? (
+            <div className="legend-note">装修报告模式会读取当前户型、热力和气流结果，生成可执行的装修建议摘要。</div>
           ) : null}
           <label className="toggle-field">
             <input type="checkbox" checked={analysisControls.showRoof} onChange={(event) => updateAnalysisControl("showRoof", event.target.checked)} />

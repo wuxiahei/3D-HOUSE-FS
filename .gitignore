@@ -3,6 +3,11 @@ node_modules
 dist
 coverage
 .turbo
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 __pycache__
 .pytest_cache
 .venv

@@ -523,10 +523,13 @@ function subtractPressureGradient(grid: SimGrid, pressure: Float32Array, vx: Flo
 }
 
 function projectVelocity(grid: SimGrid, vx: Float32Array, vy: Float32Array) {
-  const divergence = computeDivergence(grid, vx, vy);
-  const correction = solvePressure(grid, divergence, 90);
-  subtractPressureGradient(grid, correction, vx, vy, 0.65);
-  return computeDivergence(grid, vx, vy);
+  let divergence = computeDivergence(grid, vx, vy);
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    const correction = solvePressure(grid, divergence, 110);
+    subtractPressureGradient(grid, correction, vx, vy, cycle === 0 ? 0.72 : 0.56);
+    divergence = computeDivergence(grid, vx, vy);
+  }
+  return divergence;
 }
 
 function computeVorticity(grid: SimGrid, vx: Float32Array, vy: Float32Array) {
@@ -625,7 +628,7 @@ function buildCoverageSeeds(grid: SimGrid, maxSeeds = 220): FlowField["seedPoint
 
 function buildFieldSeeds(layout: HouseLayout, field: Pick<FlowField, "grid" | "vx" | "vy" | "speedMax" | "inlets">) {
   const seeds: FlowField["seedPoints"] = [...field.inlets];
-  const stride = Math.max(2, Math.floor(Math.sqrt((field.grid.cols * field.grid.rows) / 130)));
+  const stride = Math.max(1, Math.floor(Math.sqrt((field.grid.cols * field.grid.rows) / 220)));
 
   for (let row = Math.floor(stride / 2); row < field.grid.rows; row += stride) {
     for (let column = Math.floor(stride / 2); column < field.grid.cols; column += stride) {
@@ -664,12 +667,12 @@ function buildFieldSeeds(layout: HouseLayout, field: Pick<FlowField, "grid" | "v
       return Boolean(cell && field.grid.interior[cell.index]);
     })
     .sort((a, b) => b.strength - a.strength)
-    .slice(0, 150);
+    .slice(0, 240);
 
   return validSeeds.length > 0 ? validSeeds : buildFallbackSeeds(layout, field.grid);
 }
 
-function traceStreamlines(layout: HouseLayout, field: Omit<FlowField, "streamlines">) {
+function traceStreamlines(layout: HouseLayout, field: Omit<FlowField, "streamlines" | "diagnostics">) {
   const seeds =
     field.seedPoints.length > 0
       ? field.seedPoints
@@ -677,7 +680,7 @@ function traceStreamlines(layout: HouseLayout, field: Omit<FlowField, "streamlin
         ? field.inlets
         : buildFallbackSeeds(layout, field.grid);
   const streamlines: FlowField["streamlines"] = [];
-  const targetCount = Math.min(96, Math.max(38, seeds.length));
+  const targetCount = Math.min(172, Math.max(72, seeds.length));
 
   for (let seedIndex = 0; seedIndex < targetCount; seedIndex += 1) {
     const seed = seeds[seedIndex % Math.max(1, seeds.length)];
@@ -690,7 +693,7 @@ function traceStreamlines(layout: HouseLayout, field: Omit<FlowField, "streamlin
     const points: [number, number][] = [[x, y]];
     let speedTotal = 0;
 
-    for (let step = 0; step < 68; step += 1) {
+    for (let step = 0; step < 92; step += 1) {
       const velocity = sampleFlow(field, x, y);
       const speed = Math.hypot(velocity.x, velocity.y);
       if (speed < field.speedMax * 0.018) {
@@ -720,6 +723,81 @@ function traceStreamlines(layout: HouseLayout, field: Omit<FlowField, "streamlin
   return streamlines;
 }
 
+function computeFlowDiagnostics(
+  field: Omit<FlowField, "diagnostics">,
+  iterations: number
+): FlowField["diagnostics"] {
+  let cellCount = 0;
+  let meanSpeedTotal = 0;
+  let peakSpeed = 0;
+  let deadZoneCount = 0;
+  let divergenceTotal = 0;
+  let divergenceMax = 0;
+  let pressureMin = Number.POSITIVE_INFINITY;
+  let pressureMax = Number.NEGATIVE_INFINITY;
+  const covered = new Uint8Array(field.grid.interior.length);
+
+  for (let index = 0; index < field.grid.interior.length; index += 1) {
+    if (!field.grid.interior[index]) {
+      continue;
+    }
+
+    const speed = Math.hypot(field.vx[index], field.vy[index]);
+    const divergence = Math.abs(field.divergence[index]);
+    cellCount += 1;
+    meanSpeedTotal += speed;
+    peakSpeed = Math.max(peakSpeed, speed);
+    divergenceTotal += divergence;
+    divergenceMax = Math.max(divergenceMax, divergence);
+    pressureMin = Math.min(pressureMin, field.pressure[index]);
+    pressureMax = Math.max(pressureMax, field.pressure[index]);
+    if (speed / Math.max(0.001, field.speedMax) < 0.16) {
+      deadZoneCount += 1;
+    }
+  }
+
+  for (const streamline of field.streamlines) {
+    for (const [x, y] of streamline.points) {
+      const cell = cellAt(field.grid, x, y);
+      if (!cell || !field.grid.interior[cell.index]) {
+        continue;
+      }
+      for (let rowOffset = -1; rowOffset <= 1; rowOffset += 1) {
+        for (let columnOffset = -1; columnOffset <= 1; columnOffset += 1) {
+          const column = cell.column + columnOffset;
+          const row = cell.row + rowOffset;
+          if (column < 0 || column >= field.grid.cols || row < 0 || row >= field.grid.rows) {
+            continue;
+          }
+          const index = gridIndex(field.grid, column, row);
+          if (field.grid.interior[index]) {
+            covered[index] = 1;
+          }
+        }
+      }
+    }
+  }
+
+  let coveredCount = 0;
+  for (let index = 0; index < covered.length; index += 1) {
+    coveredCount += covered[index];
+  }
+
+  return {
+    iterations,
+    meanSpeed: Number((cellCount > 0 ? meanSpeedTotal / cellCount : 0).toFixed(3)),
+    peakSpeed: Number(peakSpeed.toFixed(3)),
+    deadZoneRatio: Number((cellCount > 0 ? deadZoneCount / cellCount : 0).toFixed(3)),
+    coverageRatio: Number((cellCount > 0 ? coveredCount / cellCount : 0).toFixed(3)),
+    divergenceMean: Number((cellCount > 0 ? divergenceTotal / cellCount : 0).toFixed(5)),
+    divergenceMax: Number(divergenceMax.toFixed(5)),
+    pressureSpan: Number((Number.isFinite(pressureMin) && Number.isFinite(pressureMax) ? pressureMax - pressureMin : 0).toFixed(3)),
+    inletCount: field.inlets.length,
+    seedCount: field.seedPoints.length,
+    streamlineCount: field.streamlines.length
+  };
+}
+
 export function solveFlow(layout: HouseLayout, options: FlowSolveOptions = {}): FlowField {
   const grid = rasterizeLayout(layout);
   const source = new Float32Array(grid.cols * grid.rows);
@@ -727,12 +805,13 @@ export function solveFlow(layout: HouseLayout, options: FlowSolveOptions = {}): 
   addDeviceSources(layout, grid, source, inlets);
   balanceSourceTerms(grid, source);
 
-  const pressure = solvePressure(grid, source, options.iterations ?? 180);
+  const iterations = options.iterations ?? 240;
+  const pressure = solvePressure(grid, source, iterations);
   const velocity = velocityFromPressure(layout, grid, pressure);
   const divergence = projectVelocity(grid, velocity.vx, velocity.vy);
   const verticalVelocity = computeVerticalVelocity(layout, grid);
   const vorticity = computeVorticity(grid, velocity.vx, velocity.vy);
-  const field: Omit<FlowField, "streamlines"> = {
+  const field: Omit<FlowField, "streamlines" | "diagnostics"> = {
     grid,
     pressure,
     vx: velocity.vx,
@@ -745,9 +824,14 @@ export function solveFlow(layout: HouseLayout, options: FlowSolveOptions = {}): 
     seedPoints: []
   };
   field.seedPoints = buildFieldSeeds(layout, field);
+  const streamlines = traceStreamlines(layout, field);
+  const completedField: Omit<FlowField, "diagnostics"> = {
+    ...field,
+    streamlines
+  };
 
   return {
-    ...field,
-    streamlines: traceStreamlines(layout, field)
+    ...completedField,
+    diagnostics: computeFlowDiagnostics(completedField, iterations)
   };
 }

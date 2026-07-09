@@ -24,6 +24,17 @@ export interface HeatField {
   thermalPlumes: { x: number; y: number; radius: number; strength: number; kind: "warm" | "cool" }[];
   min: number;
   max: number;
+  diagnostics: {
+    iterations: number;
+    residual: number;
+    meanTemperature: number;
+    meanGradient: number;
+    peakGradient: number;
+    verticalStratification: number;
+    sensorCount: number;
+    layerCount: number;
+    coupledAirflow: boolean;
+  };
 }
 
 export interface FlowField {
@@ -38,6 +49,19 @@ export interface FlowField {
   inlets: { x: number; y: number; strength: number }[];
   seedPoints: { x: number; y: number; strength: number }[];
   streamlines: { points: [number, number][]; speed: number }[];
+  diagnostics: {
+    iterations: number;
+    meanSpeed: number;
+    peakSpeed: number;
+    deadZoneRatio: number;
+    coverageRatio: number;
+    divergenceMean: number;
+    divergenceMax: number;
+    pressureSpan: number;
+    inletCount: number;
+    seedCount: number;
+    streamlineCount: number;
+  };
 }
 
 export interface RoomHeatSummary extends HeatmapCell {
