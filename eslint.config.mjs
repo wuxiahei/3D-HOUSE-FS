@@ -32,6 +32,7 @@ export default defineConfig([
   },
   globalIgnores([
     "**/.next/**",
+    "**/.worktrees/**",
     "**/dist/**",
     "**/coverage/**",
     "**/.turbo/**",
