@@ -23,13 +23,18 @@ export default defineConfig([
       "@typescript-eslint/no-explicit-any": "error",
     },
   },
+  {
+    files: ["apps/web/next-env.d.ts"],
+    rules: {
+      "@typescript-eslint/triple-slash-reference": "off",
+    },
+  },
   globalIgnores([
     "**/.next/**",
     "**/dist/**",
     "**/coverage/**",
     "**/.turbo/**",
     "**/*.tsbuildinfo",
-    "**/next-env.d.ts",
     "output/**",
   ]),
 ]);
