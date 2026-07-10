@@ -11,6 +11,7 @@ import {
   validateLayout
 } from "@fengshui/core";
 import type { ClimateDevice, HouseLayout, LayoutPoint, Opening, SensorPoint, TemplateId } from "@fengshui/core";
+import dynamic from "next/dynamic";
 import type { ChangeEvent, CSSProperties, PointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { requestBrowserAiDraft } from "../ai/browser-provider";
@@ -31,11 +32,19 @@ import { HeatmapPanel } from "./Analysis/HeatmapPanel";
 import { ModelingPanel } from "./Analysis/ModelingPanel";
 import { RenovationReportPanel } from "./Analysis/RenovationReportPanel";
 import { LayoutEditor } from "./Editor/LayoutEditor";
-import { SceneViewport } from "./Scene/SceneViewport";
+import { SceneErrorBoundary } from "./Scene/SceneErrorBoundary";
 import { LayoutPersistencePanel } from "./Templates/LayoutPersistencePanel";
 import { TemplatePicker } from "./Templates/TemplatePicker";
 import { useSimulation } from "../simulation/useSimulation";
 import { SAVED_LAYOUT_STORAGE_KEY, stringifyLayout } from "../utils/serializers/layout-storage";
+
+const SceneViewport = dynamic(
+  () => import("./Scene/SceneViewport").then((module) => module.SceneViewport),
+  {
+    ssr: false,
+    loading: () => <div className="scene-loading">Loading 3D workspace...</div>
+  }
+);
 
 export interface SceneLayers {
   heat: boolean;
@@ -1083,27 +1092,29 @@ export function AppShell() {
         </nav>
 
         <section className="main-stage">
-          <SceneViewport
-            layout={layout}
-            selectedRoomId={selectedRoomId}
-            selectedWallId={selectedWallId}
-            activePalace={activePalace}
-            editorMode={editorMode}
-            draftWall={draftWall}
-            layers={layers}
-            onSetEditorMode={setEditorMode}
-            onSelectRoom={selectRoom}
-            onSelectWall={setSelectedWallId}
-            onDraftWallChange={setDraftWall}
-            onCommitLayout={replaceLayout}
-            onDeleteSelectedWall={deleteSelectedWall}
-            heatmap={heatmap}
-            airflow={airflow}
-            heatField={simulation.heatField}
-            flowField={simulation.flowField}
-            controls={analysisControls}
-            fengshui={fengshui}
-          />
+          <SceneErrorBoundary>
+            <SceneViewport
+              layout={layout}
+              selectedRoomId={selectedRoomId}
+              selectedWallId={selectedWallId}
+              activePalace={activePalace}
+              editorMode={editorMode}
+              draftWall={draftWall}
+              layers={layers}
+              onSetEditorMode={setEditorMode}
+              onSelectRoom={selectRoom}
+              onSelectWall={setSelectedWallId}
+              onDraftWallChange={setDraftWall}
+              onCommitLayout={replaceLayout}
+              onDeleteSelectedWall={deleteSelectedWall}
+              heatmap={heatmap}
+              airflow={airflow}
+              heatField={simulation.heatField}
+              flowField={simulation.flowField}
+              controls={analysisControls}
+              fengshui={fengshui}
+            />
+          </SceneErrorBoundary>
         </section>
 
         <button

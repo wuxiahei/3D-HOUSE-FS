@@ -1536,3 +1536,17 @@ textarea {
     transform: translateX(0);
   }
 }
+.scene-loading,
+.scene-error {
+  display: grid;
+  min-height: 100%;
+  place-content: center;
+  gap: 0.5rem;
+  color: #dbeafe;
+  background: #0f1720;
+  text-align: center;
+}
+
+.scene-error {
+  color: #fecaca;
+}
