@@ -24,6 +24,7 @@ import {
 } from "../lib/ai-config";
 import type { EditorMode } from "../lib/editor";
 import { AirflowPanel } from "./Analysis/AirflowPanel";
+import { AnalysisControlsPanel } from "./Analysis/AnalysisControlsPanel";
 import { FengshuiPanel } from "./Analysis/FengshuiPanel";
 import { HeatmapPanel } from "./Analysis/HeatmapPanel";
 import { ModelingPanel } from "./Analysis/ModelingPanel";
@@ -43,7 +44,7 @@ export interface SceneLayers {
 }
 
 export type AnalysisLayer = "heat" | "airflow" | "fengshui";
-type WorkspaceMode = "modeling" | "analysis" | "renovation";
+export type WorkspaceMode = "modeling" | "analysis" | "renovation";
 
 export interface AnalysisControls {
   showHeatLayers: boolean;
@@ -111,7 +112,21 @@ function cloneLayout(layout: HouseLayout): HouseLayout {
   return JSON.parse(JSON.stringify(layout)) as HouseLayout;
 }
 
-function ToolIcon({ name }: { name: "select" | "wall" | "door" | "window" | "ac" | "sensor" | "heat" | "air" | "compass" | "walls" }) {
+function ToolIcon({ name }: { name: "select" | "wall" | "door" | "window" | "ac" | "sensor" | "heat" | "air" | "compass" | "walls" | "eye" | "eye-off" }) {
+  if (name === "eye") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 5c5 0 9 4.2 10 7-1 2.8-5 7-10 7S3 14.8 2 12c1-2.8 5-7 10-7zm0 3a4 4 0 100 8 4 4 0 000-8zm0 2a2 2 0 110 4 2 2 0 010-4z" />
+      </svg>
+    );
+  }
+  if (name === "eye-off") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3.3 4.7l16 16-1.4 1.4-2.7-2.7c-1 .4-2.1.6-3.2.6-5 0-9-4.2-10-7 .5-1.4 1.7-3.2 3.5-4.7L1.9 6.1zm5 5l1.5 1.5a2 2 0 002.7 2.7l1.5 1.5A4 4 0 018.3 9.7zM12 5c5 0 9 4.2 10 7-.5 1.3-1.5 2.9-3.1 4.3l-2.2-2.1A4 4 0 0011 6.2L9.3 4.5C10.2 5.2 11.1 5 12 5z" />
+      </svg>
+    );
+  }
   if (name === "select") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -191,6 +206,7 @@ export function AppShell() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("modeling");
   const [activeAnalysis, setActiveAnalysis] = useState<AnalysisLayer>("heat");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("properties");
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("做一个南向客厅、通风好、适合三口之家的住宅");
   const [aiReferenceFiles, setAiReferenceFiles] = useState<File[]>([]);
   const [aiDraftPending, setAiDraftPending] = useState(false);
@@ -758,12 +774,15 @@ export function AppShell() {
     setSelectedWallId(null);
   }
 
-  function toggleLayer(key: keyof SceneLayers) {
+  function toggleLayerVisibility(key: keyof SceneLayers) {
     setLayers((current) => ({ ...current, [key]: !current[key] }));
-    if (key === "heat" || key === "airflow" || key === "fengshui") {
-      setActiveAnalysis(key);
-      setWorkspaceMode("analysis");
-    }
+  }
+
+  function focusAnalysis(key: AnalysisLayer) {
+    setActiveAnalysis(key);
+    setWorkspaceMode("analysis");
+    // 聚焦某个分析时,确保它的叠层可见,避免"选中却看不到"的困惑。
+    setLayers((current) => (current[key] ? current : { ...current, [key]: true }));
   }
 
   function updateAnalysisControl<K extends keyof AnalysisControls>(key: K, value: AnalysisControls[K]) {
@@ -797,49 +816,105 @@ export function AppShell() {
             </button>
           ))}
         </div>
-        <div className="layer-strip analysis-switch" aria-label="analysis layers">
+        <div className="layer-strip analysis-switch" aria-label="分析图层">
           {[
             ["heat", "热力", "heat"],
             ["airflow", "气流", "air"],
             ["fengshui", "罗盘", "compass"]
-          ].map(([key, label, icon]) => (
-            <button
-              key={key}
-              type="button"
-              className={`${layers[key as AnalysisLayer] ? "active" : ""} ${activeAnalysis === key ? "current" : ""}`}
-              onClick={() => toggleLayer(key as AnalysisLayer)}
-            >
-              <ToolIcon name={icon as "heat" | "air" | "compass"} />
-              <span>{label}</span>
-            </button>
-          ))}
+          ].map(([key, label, icon]) => {
+            const layerKey = key as AnalysisLayer;
+            const visible = layers[layerKey];
+            const current = activeAnalysis === key && workspaceMode === "analysis";
+            return (
+              <div key={key} className={`analysis-layer-group ${current ? "current" : ""}`}>
+                <button
+                  type="button"
+                  className="analysis-focus"
+                  aria-pressed={current}
+                  title={`聚焦${label}分析`}
+                  onClick={() => focusAnalysis(layerKey)}
+                >
+                  <ToolIcon name={icon as "heat" | "air" | "compass"} />
+                  <span>{label}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`analysis-visibility ${visible ? "on" : "off"}`}
+                  aria-pressed={visible}
+                  aria-label={`${visible ? "隐藏" : "显示"}${label}叠层`}
+                  title={`${visible ? "隐藏" : "显示"}${label}叠层`}
+                  onClick={() => toggleLayerVisibility(layerKey)}
+                >
+                  <ToolIcon name={visible ? "eye" : "eye-off"} />
+                </button>
+              </div>
+            );
+          })}
         </div>
-        <button type="button" className={`aux-layer-toggle ${layers.walls ? "active" : ""}`} onClick={() => toggleLayer("walls")}>
-          <ToolIcon name="walls" />
+        <button
+          type="button"
+          className={`aux-layer-toggle ${layers.walls ? "active" : ""}`}
+          aria-pressed={layers.walls}
+          title={`${layers.walls ? "隐藏" : "显示"}结构墙体`}
+          onClick={() => toggleLayerVisibility("walls")}
+        >
+          <ToolIcon name={layers.walls ? "eye" : "eye-off"} />
           <span>结构</span>
         </button>
-        <div className="status-pill">{simulationPending ? "场计算中" : validation.length === 0 ? "模型有效" : `${validation.length} 个问题`}</div>
+        <div className={`status-pill ${simulationPending ? "computing" : ""}`}>
+          {simulationPending ? (
+            <>
+              <span className="status-spinner" aria-hidden="true" />
+              场计算中
+            </>
+          ) : validation.length === 0 ? (
+            "模型有效"
+          ) : (
+            `${validation.length} 个问题`
+          )}
+        </div>
       </header>
 
       <div className="studio-body">
-        <nav className="tool-rail" aria-label="main tools">
+        <nav className="tool-rail" aria-label="编辑工具">
           <button type="button" className={editorMode === "select" ? "active" : ""} title="选择" onClick={() => setEditorMode("select")}>
             <ToolIcon name="select" />
+            <em>选择</em>
           </button>
           <button type="button" className={editorMode === "draw-wall" ? "active" : ""} title="画墙" onClick={() => setEditorMode("draw-wall")}>
             <ToolIcon name="wall" />
+            <em>画墙</em>
           </button>
-          <button type="button" disabled={!quickOpeningWallId} title="加门" onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "door")}>
+          <button
+            type="button"
+            disabled={!quickOpeningWallId}
+            title={quickOpeningWallId ? "在选中墙体上加门" : "请先选择一面墙"}
+            onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "door")}
+          >
             <ToolIcon name="door" />
+            <em>加门</em>
           </button>
-          <button type="button" disabled={!quickOpeningWallId} title="加窗" onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "window")}>
+          <button
+            type="button"
+            disabled={!quickOpeningWallId}
+            title={quickOpeningWallId ? "在选中墙体上加窗" : "请先选择一面墙"}
+            onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "window")}
+          >
             <ToolIcon name="window" />
+            <em>加窗</em>
           </button>
-          <button type="button" disabled={!selectedRoom} title="加空调" onClick={() => selectedRoom && addDevice(selectedRoom.id, "ac")}>
+          <button
+            type="button"
+            disabled={!selectedRoom}
+            title={selectedRoom ? "为选中房间加空调" : "请先选择一个房间"}
+            onClick={() => selectedRoom && addDevice(selectedRoom.id, "ac")}
+          >
             <ToolIcon name="ac" />
+            <em>空调</em>
           </button>
           <button type="button" title="加温度点" onClick={addSensorPoint}>
             <ToolIcon name="sensor" />
+            <em>温度点</em>
           </button>
         </nav>
 
@@ -867,7 +942,26 @@ export function AppShell() {
           />
         </section>
 
-        <aside className="inspector">
+        <button
+          type="button"
+          className="inspector-fab"
+          aria-expanded={inspectorOpen}
+          onClick={() => setInspectorOpen((current) => !current)}
+        >
+          {inspectorOpen ? "关闭属性" : "属性 / 模板"}
+        </button>
+
+        <aside className={`inspector ${inspectorOpen ? "open" : ""}`}>
+          {workspaceMode === "analysis" ? (
+            <AnalysisControlsPanel
+              workspaceMode={workspaceMode}
+              activeAnalysis={activeAnalysis}
+              controls={analysisControls}
+              onUpdate={updateAnalysisControl}
+              heatField={simulation.heatField}
+              flowField={simulation.flowField}
+            />
+          ) : null}
           <div className="inspector-tabs">
             {[
               ["properties", "属性"],
@@ -960,128 +1054,6 @@ export function AppShell() {
             <FengshuiPanel layout={layout} fengshui={fengshui} selectedRoomId={selectedRoom?.id ?? null} activePalace={activePalace} onSelectRoom={selectRoom} />
           ) : null}
           {workspaceMode === "renovation" ? <RenovationReportPanel layout={layout} heatmap={heatmap} airflow={airflow} /> : null}
-        </div>
-        <div className="analysis-controls">
-          {workspaceMode === "modeling" ? (
-            <>
-              <div className="legend-note">建模模式可以使用 AI 草案、模板或左侧工具手动编辑；3D 模型会保持为同一项目主体。</div>
-            </>
-          ) : null}
-          {workspaceMode === "analysis" && activeAnalysis === "heat" ? (
-            <>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showHeatLayers} onChange={(event) => updateAnalysisControl("showHeatLayers", event.target.checked)} />
-                <span>3D 温度层</span>
-              </label>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showHeatContours} onChange={(event) => updateAnalysisControl("showHeatContours", event.target.checked)} />
-                <span>等温线</span>
-              </label>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showHeatSlices} onChange={(event) => updateAnalysisControl("showHeatSlices", event.target.checked)} />
-                <span>剖切面</span>
-              </label>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showHeatFlux} onChange={(event) => updateAnalysisControl("showHeatFlux", event.target.checked)} />
-                <span>热通量线</span>
-              </label>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showHeatPlumes} onChange={(event) => updateAnalysisControl("showHeatPlumes", event.target.checked)} />
-                <span>冷热羽流</span>
-              </label>
-              {analysisControls.showHeatSlices ? (
-                <>
-                  <label className="range-field">
-                    <span>剖面方向</span>
-                    <select value={analysisControls.heatSliceMode} onChange={(event) => updateAnalysisControl("heatSliceMode", event.target.value as AnalysisControls["heatSliceMode"])}>
-                      <option value="both">双向</option>
-                      <option value="x">横剖</option>
-                      <option value="y">纵剖</option>
-                    </select>
-                  </label>
-                  <label className="range-field">
-                    <span>横剖位置</span>
-                    <input type="range" min={0.08} max={0.92} step={0.02} value={analysisControls.heatSliceX} onChange={(event) => updateAnalysisControl("heatSliceX", Number(event.target.value))} />
-                  </label>
-                  <label className="range-field">
-                    <span>纵剖位置</span>
-                    <input type="range" min={0.08} max={0.92} step={0.02} value={analysisControls.heatSliceY} onChange={(event) => updateAnalysisControl("heatSliceY", Number(event.target.value))} />
-                  </label>
-                </>
-              ) : null}
-              <div className="legend-bar heat-legend" aria-hidden="true" />
-              <div className="legend-readout">
-                <span>{simulation.heatField.min.toFixed(1)} C</span>
-                <span>{((simulation.heatField.min + simulation.heatField.max) / 2).toFixed(1)} C</span>
-                <span>{simulation.heatField.max.toFixed(1)} C</span>
-              </div>
-            </>
-          ) : null}
-          {workspaceMode === "analysis" && activeAnalysis === "airflow" ? (
-            <>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showAirPressure} onChange={(event) => updateAnalysisControl("showAirPressure", event.target.checked)} />
-                <span>压力底图</span>
-              </label>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showAirPathlines} onChange={(event) => updateAnalysisControl("showAirPathlines", event.target.checked)} />
-                <span>路径线</span>
-              </label>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showAirGlyphs} onChange={(event) => updateAnalysisControl("showAirGlyphs", event.target.checked)} />
-                <span>速度矢量</span>
-              </label>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showAirParticles} onChange={(event) => updateAnalysisControl("showAirParticles", event.target.checked)} />
-                <span>粒子场</span>
-              </label>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.animateAirflow} onChange={(event) => updateAnalysisControl("animateAirflow", event.target.checked)} />
-                <span>动画</span>
-              </label>
-              <label className="range-field">
-                <span>粒子密度</span>
-                <input type="range" min={0.15} max={1} step={0.05} value={analysisControls.airflowParticleDensity} onChange={(event) => updateAnalysisControl("airflowParticleDensity", Number(event.target.value))} />
-              </label>
-              <label className="range-field">
-                <span>流速显示</span>
-                <input type="range" min={0.4} max={2.2} step={0.1} value={analysisControls.airflowParticleSpeed} onChange={(event) => updateAnalysisControl("airflowParticleSpeed", Number(event.target.value))} />
-              </label>
-              <label className="toggle-field">
-                <input type="checkbox" checked={analysisControls.showAirDeadZones} onChange={(event) => updateAnalysisControl("showAirDeadZones", event.target.checked)} />
-                <span>死角区</span>
-              </label>
-              <label className="range-field">
-                <span>死角阈值</span>
-                <input type="range" min={0.06} max={0.32} step={0.02} value={analysisControls.airDeadZoneThreshold} onChange={(event) => updateAnalysisControl("airDeadZoneThreshold", Number(event.target.value))} />
-              </label>
-              <div className="legend-bar flow-legend" aria-hidden="true" />
-              <span className="legend-note">{simulation.flowField.streamlines.length} 条路径 / {simulation.flowField.seedPoints.length} 个种子</span>
-            </>
-          ) : null}
-          {workspaceMode === "analysis" && activeAnalysis === "fengshui" ? (
-            <>
-              <label className="range-field">
-                <span>罗盘模式</span>
-                <select value={analysisControls.compassMode} onChange={(event) => updateAnalysisControl("compassMode", event.target.value as AnalysisControls["compassMode"])}>
-                  <option value="simple">简洁</option>
-                  <option value="professional">专业</option>
-                </select>
-              </label>
-              <div className="legend-note">简洁模式保留方向和双针；专业模式显示 24 山、八卦、九星和基准线。</div>
-            </>
-          ) : null}
-          {workspaceMode === "renovation" ? (
-            <div className="legend-note">装修报告模式会读取当前户型、热力和气流结果，生成可执行的装修建议摘要。</div>
-          ) : null}
-          <label className="toggle-field">
-            <input type="checkbox" checked={analysisControls.showRoof} onChange={(event) => updateAnalysisControl("showRoof", event.target.checked)} />
-            <span>屋顶</span>
-          </label>
-          <label className="range-field">
-            <span>结构透明度</span>
-            <input type="range" min={0.18} max={0.92} step={0.02} value={analysisControls.structureOpacity} onChange={(event) => updateAnalysisControl("structureOpacity", Number(event.target.value))} />
-          </label>
         </div>
       </footer>
     </main>

@@ -141,9 +141,9 @@ export function SceneViewport({
       </div>
 
       <div className="viewport-hud bottom-left">
-        <span>热力 {layers.heat ? "开" : "关"}</span>
-        <span>气流 {layers.airflow ? "开" : "关"}</span>
-        <span>罗盘风水 {layers.fengshui ? "开" : "关"}</span>
+        <span className={layers.heat ? "on" : "off"}>热力 {layers.heat ? "开" : "关"}</span>
+        <span className={layers.airflow ? "on" : "off"}>气流 {layers.airflow ? "开" : "关"}</span>
+        <span className={layers.fengshui ? "on" : "off"}>罗盘风水 {layers.fengshui ? "开" : "关"}</span>
       </div>
 
       <button
