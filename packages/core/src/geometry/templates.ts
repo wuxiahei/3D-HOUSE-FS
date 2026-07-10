@@ -18,18 +18,65 @@ function addOpening(
 ) {
   const wallLength = wallLengthForSide(room, side);
   const normalizedWidth = Number(Math.min(width, Math.max(0.35, wallLength - 0.16)).toFixed(2));
-  const normalizedOffset = Number(Math.min(Math.max(0.08, offset), Math.max(0.08, wallLength - normalizedWidth - 0.08)).toFixed(2));
+  const wallId = `${room.id}-${side}`;
+  const normalizedOffset = findAvailableOpeningOffset(
+    openings,
+    wallId,
+    wallLength,
+    normalizedWidth,
+    offset
+  );
 
   openings.push({
     id: `${room.id}-${side}-${type}-${openings.length + 1}`,
     type,
-    wallId: `${room.id}-${side}`,
+    wallId,
     width: normalizedWidth,
     height: type === "door" ? 2.1 : 1.35,
     offset: normalizedOffset,
     sillHeight: type === "window" ? 0.9 : undefined,
     notes
   });
+}
+
+function openingFits(openings: Opening[], wallId: string, offset: number, width: number) {
+  const start = offset;
+  const end = offset + width;
+  return openings
+    .filter((opening) => opening.wallId === wallId)
+    .every((opening) => {
+      const overlap = Math.min(end, opening.offset + opening.width) - Math.max(start, opening.offset);
+      return overlap <= 0.02;
+    });
+}
+
+function findAvailableOpeningOffset(
+  openings: Opening[],
+  wallId: string,
+  wallLength: number,
+  width: number,
+  preferredOffset: number
+) {
+  const maxOffset = Math.max(0, wallLength - width);
+  const clampOffset = (value: number) => Number(Math.min(Math.max(0.08, value), Math.max(0.08, maxOffset - 0.08)).toFixed(2));
+  const candidates = [
+    preferredOffset,
+    0.08,
+    Math.max(0.08, maxOffset - 0.08),
+    maxOffset / 2
+  ].map(clampOffset);
+
+  for (let offset = 0.08; offset <= maxOffset; offset += 0.1) {
+    candidates.push(clampOffset(offset));
+  }
+
+  for (const candidate of candidates) {
+    if (openingFits(openings, wallId, candidate, width)) {
+      return candidate;
+    }
+  }
+
+  return clampOffset(preferredOffset);
 }
 
 function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number) {
@@ -77,6 +124,10 @@ function createOpenings(rooms: Room[]): Opening[] {
   const openings: Opening[] = [];
 
   rooms.forEach((room) => {
+    if (room.purpose === "entry" || room.purpose === "bathroom") {
+      return;
+    }
+
     const side = room.depth >= room.width ? "east" : "south";
     const wallLength = wallLengthForSide(room, side);
     addOpening(

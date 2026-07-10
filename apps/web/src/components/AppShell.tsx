@@ -323,7 +323,8 @@ export function AppShell() {
 
   const validation = useMemo(() => validateLayout(layout), [layout]);
   const { simulation, pending: simulationPending } = useSimulation(layout);
-  const simulationStatus = simulationPending ? "computing" : validation.length === 0 ? "ready" : "invalid";
+  const validationErrorCount = validation.filter((issue) => issue.level === "error").length;
+  const simulationStatus = simulationPending ? "computing" : validationErrorCount === 0 ? "ready" : "invalid";
   const heatmap = simulation.heatmap;
   const airflow = simulation.airflow;
   const fengshui = useMemo(() => analyzeFengshui(layout), [layout]);
@@ -1047,10 +1048,10 @@ export function AppShell() {
               <span className="status-spinner" aria-hidden="true" />
               场计算中
             </>
-          ) : validation.length === 0 ? (
+          ) : validationErrorCount === 0 ? (
             "模型有效"
           ) : (
-            `${validation.length} 个问题`
+            `${validationErrorCount} 个错误`
           )}
         </div>
       </header>

@@ -151,7 +151,7 @@ function roomInsideBounds(room: Room, bounds: { width: number; depth: number }) 
 function roomsOverlap(left: Room, right: Room) {
   const xOverlap = Math.min(left.origin.x + left.width, right.origin.x + right.width) - Math.max(left.origin.x, right.origin.x);
   const yOverlap = Math.min(left.origin.y + left.depth, right.origin.y + right.depth) - Math.max(left.origin.y, right.origin.y);
-  return xOverlap > 0 && yOverlap > 0;
+  return xOverlap > 0.001 && yOverlap > 0.001;
 }
 
 function addDuplicateIssues(ctx: z.RefinementCtx, label: string, values: string[]) {

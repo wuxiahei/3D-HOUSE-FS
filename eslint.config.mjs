@@ -21,6 +21,7 @@ export default defineConfig([
         { argsIgnorePattern: "^_" },
       ],
       "@typescript-eslint/no-explicit-any": "error",
+      "@next/next/no-html-link-for-pages": "off",
     },
   },
   {
