@@ -1,5 +1,5 @@
-import type { ClimateDevice, HouseLayout, LayoutPoint, Opening, WallSegment } from "@fengshui/core";
-import { wallCenter, wallLength } from "@fengshui/core";
+import type { HouseLayout, LayoutPoint, Opening, WallSegment } from "@fengshui/core";
+import { wallCenter } from "@fengshui/core";
 import { cellCenter, rasterizeLayout } from "../grid/rasterize";
 import type { FlowField, SimGrid } from "../types";
 
@@ -605,25 +605,6 @@ function buildFallbackSeeds(layout: HouseLayout, grid: SimGrid) {
     const cell = cellAt(grid, seed.x, seed.y);
     return Boolean(cell && grid.interior[cell.index]);
   });
-}
-
-function buildCoverageSeeds(grid: SimGrid, maxSeeds = 220): FlowField["seedPoints"] {
-  const interiorCount = grid.interior.reduce((total, value) => total + value, 0);
-  const stride = Math.max(1, Math.floor(Math.sqrt(Math.max(1, interiorCount) / maxSeeds)));
-  const seeds: FlowField["seedPoints"] = [];
-
-  for (let row = 0; row < grid.rows; row += stride) {
-    for (let column = 0; column < grid.cols; column += stride) {
-      const index = gridIndex(grid, column, row);
-      if (!grid.interior[index]) {
-        continue;
-      }
-      const center = cellCenter(grid, column, row);
-      seeds.push({ x: center.x, y: center.y, strength: 0.08 });
-    }
-  }
-
-  return seeds;
 }
 
 function buildFieldSeeds(layout: HouseLayout, field: Pick<FlowField, "grid" | "vx" | "vy" | "speedMax" | "inlets">) {

@@ -117,6 +117,7 @@ export function HeatmapPanel({
             <span>蓝色偏冷，红色偏热</span>
           </div>
           <div className="heat-preview-frame" style={{ aspectRatio: `${field.grid.cols} / ${field.grid.rows}` }}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- Generated data URL preview cannot use the Next image optimizer. */}
             <img src={previewSrc} alt="连续热力图预览" className="heat-preview-image" />
           </div>
           <div className="heat-preview-scale">

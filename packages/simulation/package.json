@@ -6,6 +6,7 @@
   "types": "src/index.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit false",
+    "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

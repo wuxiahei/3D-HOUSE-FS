@@ -28,12 +28,6 @@ function sceneZ(layout: HouseLayout, y: number) {
   return y - layout.bounds.depth / 2;
 }
 
-function heatColor(intensity: number) {
-  const color = new THREE.Color();
-  color.setHSL((205 - intensity * 175) / 360, 0.82, 0.58);
-  return color;
-}
-
 const heatStops = [
   { at: 0, color: new THREE.Color("#163dff") },
   { at: 0.22, color: new THREE.Color("#18a7ff") },
@@ -140,132 +134,6 @@ function pointRoomId(layout: HouseLayout, x: number, y: number) {
   );
 }
 
-function pointInAnyRoom(layout: HouseLayout, point: { x: number; y: number }) {
-  return layout.rooms.some(
-    (room) =>
-      point.x >= room.origin.x &&
-      point.x <= room.origin.x + room.width &&
-      point.y >= room.origin.y &&
-      point.y <= room.origin.y + room.depth
-  );
-}
-
-function sampleHeatIntensity(layout: HouseLayout, heatmap: HeatmapCell[], point: { x: number; y: number }) {
-  if (heatmap.length === 0) {
-    return 0.45;
-  }
-
-  let weighted = 0;
-  let total = 0;
-  heatmap.forEach((cell) => {
-    const center = { x: cell.x + cell.width / 2, y: cell.y + cell.depth / 2 };
-    const distance = Math.max(0.08, Math.hypot(point.x - center.x, point.y - center.y));
-    const weight = 1 / (distance * distance);
-    weighted += cell.intensity * weight;
-    total += weight;
-  });
-
-  const roomEdgeGlow = layout.rooms.reduce((glow, room) => {
-    const nearX = Math.min(Math.abs(point.x - room.origin.x), Math.abs(point.x - (room.origin.x + room.width)));
-    const nearY = Math.min(Math.abs(point.y - room.origin.y), Math.abs(point.y - (room.origin.y + room.depth)));
-    return Math.max(glow, Math.exp(-Math.min(nearX, nearY) * 2.8) * 0.08);
-  }, 0);
-
-  return THREE.MathUtils.clamp(weighted / total + roomEdgeGlow, 0, 1);
-}
-
-function makeHeatmapTexture(layout: HouseLayout, heatmap: HeatmapCell[]) {
-  const size = 384;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return new THREE.CanvasTexture(canvas);
-  }
-
-  const image = context.createImageData(size, size);
-  for (let py = 0; py < size; py += 1) {
-    for (let px = 0; px < size; px += 1) {
-      const x = (px / (size - 1)) * layout.bounds.width;
-      const y = (py / (size - 1)) * layout.bounds.depth;
-      const insideRoom = pointInAnyRoom(layout, { x, y });
-      const intensity = sampleHeatIntensity(layout, heatmap, { x, y });
-      const color = colorFromRamp(intensity);
-      const contour = insideRoom && Math.abs((intensity * 8) % 1 - 0.5) < 0.028;
-      const index = (py * size + px) * 4;
-
-      image.data[index] = Math.round(color.r * 255 + (contour ? 34 : 0));
-      image.data[index + 1] = Math.round(color.g * 255 + (contour ? 34 : 0));
-      image.data[index + 2] = Math.round(color.b * 255 + (contour ? 34 : 0));
-      image.data[index + 3] = insideRoom ? 210 : 28;
-    }
-  }
-
-  context.putImageData(image, 0, 0);
-  context.globalCompositeOperation = "screen";
-  heatmap.forEach((cell) => {
-    const x = ((cell.x + cell.width / 2) / layout.bounds.width) * size;
-    const y = ((cell.y + cell.depth / 2) / layout.bounds.depth) * size;
-    const radius = Math.max(cell.width / layout.bounds.width, cell.depth / layout.bounds.depth) * size * 1.9;
-    const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
-    const color = colorFromRamp(cell.intensity);
-    gradient.addColorStop(0, `rgba(${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)}, 0.42)`);
-    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-    context.fillStyle = gradient;
-    context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-  });
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearFilter;
-  texture.needsUpdate = true;
-  return texture;
-}
-
-function makeHeatLegendTexture(minTemp: number, maxTemp: number) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 180;
-  canvas.height = 360;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return new THREE.CanvasTexture(canvas);
-  }
-
-  context.fillStyle = "rgba(9, 13, 16, 0.78)";
-  context.strokeStyle = "rgba(255, 255, 255, 0.24)";
-  context.lineWidth = 2;
-  context.roundRect(8, 8, 164, 344, 14);
-  context.fill();
-  context.stroke();
-  context.fillStyle = "#f4f7f5";
-  context.font = "600 18px Microsoft YaHei, Segoe UI, sans-serif";
-  context.fillText("温度 C", 28, 42);
-
-  for (let y = 0; y < 230; y += 1) {
-    const value = 1 - y / 229;
-    const color = colorFromRamp(value);
-    context.fillStyle = `rgb(${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)})`;
-    context.fillRect(34, 72 + y, 38, 1);
-  }
-
-  context.strokeStyle = "rgba(255,255,255,0.45)";
-  context.strokeRect(34, 72, 38, 230);
-  context.fillStyle = "#dbe7e2";
-  context.font = "500 15px Microsoft YaHei, Segoe UI, sans-serif";
-  context.fillText(maxTemp.toFixed(1), 84, 82);
-  context.fillText(((minTemp + maxTemp) / 2).toFixed(1), 84, 190);
-  context.fillText(minTemp.toFixed(1), 84, 304);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.needsUpdate = true;
-  return texture;
-}
-
 function makeYinYangTexture() {
   const canvas = document.createElement("canvas");
   canvas.width = 256;
@@ -307,11 +175,6 @@ function makeYinYangTexture() {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
   return texture;
-}
-
-function directionVector(direction: string) {
-  const angle = directionToRadians(direction);
-  return new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).normalize();
 }
 
 function degreesVector(degrees: number) {
@@ -357,20 +220,6 @@ function getRenderableWalls(layout: HouseLayout) {
       source: custom?.source ?? first.source
     };
   });
-}
-
-function directionToRadians(direction: string) {
-  const map: Record<string, number> = {
-    E: 0,
-    SE: Math.PI / 4,
-    S: Math.PI / 2,
-    SW: (Math.PI * 3) / 4,
-    W: Math.PI,
-    NW: (Math.PI * 5) / 4,
-    N: (Math.PI * 3) / 2,
-    NE: (Math.PI * 7) / 4
-  };
-  return map[direction] ?? 0;
 }
 
 function makeLabelTexture(text: string, accent = "#19c2ff", boxed = true) {
@@ -488,60 +337,6 @@ function RoomMeshes({
   );
 }
 
-function HeatmapOverlay({
-  layout,
-  heatmap,
-  sensors,
-  visible
-}: {
-  layout: HouseLayout;
-  heatmap: HeatmapCell[];
-  sensors: SensorPoint[];
-  visible: boolean;
-}) {
-  const heatTexture = useMemo(() => makeHeatmapTexture(layout, heatmap), [heatmap, layout]);
-  const temperatures = heatmap.map((cell) => cell.temperature);
-  const minTemp = Math.min(20, ...temperatures, ...sensors.map((sensor) => sensor.temperature));
-  const maxTemp = Math.max(28, ...temperatures, ...sensors.map((sensor) => sensor.temperature));
-  const legendTexture = useMemo(() => makeHeatLegendTexture(minTemp, maxTemp), [maxTemp, minTemp]);
-
-  useEffect(() => {
-    return () => {
-      heatTexture.dispose();
-      legendTexture.dispose();
-    };
-  }, [heatTexture, legendTexture]);
-
-  if (!visible) {
-    return null;
-  }
-
-  return (
-    <>
-      <mesh position={[0, 0.105, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[layout.bounds.width, layout.bounds.depth, 64, 64]} />
-        <meshBasicMaterial map={heatTexture} transparent opacity={0.88} depthWrite={false} />
-      </mesh>
-      {sensors.map((sensor) => (
-        <group key={sensor.id} position={[sceneX(layout, sensor.x), 0.42, sceneZ(layout, sensor.y)]}>
-          <mesh>
-            <sphereGeometry args={[0.1, 18, 18]} />
-            <meshStandardMaterial color={colorFromRamp((sensor.temperature - 20) / 12)} emissive="#ff7a00" emissiveIntensity={0.25} />
-          </mesh>
-          <mesh position={[0, -0.18, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[0.13, 0.2, 24]} />
-            <meshBasicMaterial color="#ffffff" transparent opacity={0.72} depthWrite={false} />
-          </mesh>
-          <LabelSprite text={`${sensor.temperature.toFixed(1)}C`} position={[0, 0.3, 0]} accent="#ffd166" />
-        </group>
-      ))}
-      <sprite position={[layout.bounds.width / 2 + 0.88, 1.15, 0]} scale={[0.7, 1.4, 1]}>
-        <spriteMaterial map={legendTexture} transparent depthWrite={false} />
-      </sprite>
-    </>
-  );
-}
-
 const heatVertexShader = `
   varying vec2 vUv;
   void main() {
@@ -594,69 +389,6 @@ const heatFragmentShader = `
     gl_FragColor = vec4(color, uAlpha);
   }
 `;
-
-function HeatFieldColumns({
-  layout,
-  field
-}: {
-  layout: HouseLayout;
-  field: HeatField;
-}) {
-  const columns = useMemo(() => {
-    const stride = Math.max(2, Math.round(Math.max(field.grid.cols, field.grid.rows) / 22));
-    const span = Math.max(0.001, field.max - field.min);
-    const items: {
-      id: string;
-      x: number;
-      z: number;
-      height: number;
-      width: number;
-      color: THREE.Color;
-      opacity: number;
-    }[] = [];
-
-    for (let row = 0; row < field.grid.rows; row += stride) {
-      for (let column = 0; column < field.grid.cols; column += stride) {
-        const index = row * field.grid.cols + column;
-        if (!field.grid.interior[index]) {
-          continue;
-        }
-        const centerX = field.grid.originX + (column + 0.5) * field.grid.cellSize;
-        const centerY = field.grid.originY + (row + 0.5) * field.grid.cellSize;
-        const normalized = THREE.MathUtils.clamp((field.temperature[index] - field.min) / span, 0, 1);
-        items.push({
-          id: `${column}-${row}`,
-          x: sceneX(layout, centerX),
-          z: sceneZ(layout, centerY),
-          height: 0.18 + normalized * 0.86,
-          width: field.grid.cellSize * stride * 0.62,
-          color: colorFromRamp(normalized),
-          opacity: 0.16 + normalized * 0.2
-        });
-      }
-    }
-
-    return items;
-  }, [field, layout]);
-
-  return (
-    <group>
-      {columns.map((column) => (
-        <mesh key={column.id} position={[column.x, 0.16 + column.height / 2, column.z]} raycast={noRaycast}>
-          <boxGeometry args={[column.width, column.height, column.width]} />
-          <meshStandardMaterial
-            color={column.color}
-            emissive={column.color}
-            emissiveIntensity={0.16}
-            transparent
-            opacity={column.opacity}
-            depthWrite={false}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-}
 
 function HeatPlumes({ layout, field }: { layout: HouseLayout; field: HeatField }) {
   return (
@@ -1023,7 +755,7 @@ function HeatFieldOverlay({
   );
   const temperatureTextures = useMemo(
     () => temperatureLayers.map((layer) => makeScalarTexture(layer, field.grid.cols, field.grid.rows)),
-    [field]
+    [field, temperatureLayers]
   );
   const maskTexture = useMemo(
     () => makeMaskTexture(field.grid.interior, field.grid.cols, field.grid.rows),
@@ -1172,88 +904,6 @@ function AirflowCurtain({
       <planeGeometry args={[width, height, 1, 8]} />
       <meshBasicMaterial color={color} transparent opacity={0.18} depthWrite={false} side={THREE.DoubleSide} />
     </mesh>
-  );
-}
-
-function AirflowOverlay({
-  layout,
-  airflow,
-  selectedRoomId,
-  visible
-}: {
-  layout: HouseLayout;
-  airflow: AirflowVector[];
-  selectedRoomId: string | null;
-  visible: boolean;
-}) {
-  if (!visible) {
-    return null;
-  }
-
-  return (
-    <>
-      {layout.rooms.map((room) => {
-        const flow = airflow.find((item) => item.roomId === room.id);
-        if (!flow) {
-          return null;
-        }
-        const isSelected = selectedRoomId === room.id;
-        const direction = directionVector(flow.toDirection);
-        const side = new THREE.Vector3(-direction.z, 0, direction.x).normalize();
-        const center = new THREE.Vector3(
-          sceneX(layout, room.origin.x + room.width / 2),
-          0,
-          sceneZ(layout, room.origin.y + room.depth / 2)
-        );
-        const length = Math.max(0.9, Math.min(room.width, room.depth) * (0.74 + flow.strength * 0.28));
-        const spread = Math.min(room.width, room.depth) * 0.22;
-        const color = colorFromRamp(0.2 + flow.strength * 0.72);
-        const streamCount = isSelected ? 5 : 3;
-        const streams = Array.from({ length: streamCount }, (_, index) => {
-          const ratio = index / (streamCount - 1) - 0.5;
-          const offset = side.clone().multiplyScalar(ratio * spread);
-          const bend = side.clone().multiplyScalar((index % 2 === 0 ? 1 : -1) * spread * 0.22);
-          const start = center.clone().add(offset).add(direction.clone().multiplyScalar(-length / 2));
-          const middle = center.clone().add(offset).add(bend);
-          const end = center.clone().add(offset).add(direction.clone().multiplyScalar(length / 2));
-          return {
-            floor: [
-              start.clone().setY(0.18),
-              middle.clone().setY(0.2 + flow.strength * 0.08),
-              end.clone().setY(0.18)
-            ],
-            volume: [
-              start.clone().setY(0.75 + ratio * 0.08),
-              middle.clone().add(bend).setY(1.0 + flow.strength * 0.22),
-              end.clone().setY(0.76 - ratio * 0.08)
-            ],
-            end
-          };
-        });
-        const inlet = center.clone().add(direction.clone().multiplyScalar(-length / 2 - 0.08));
-        const outlet = center.clone().add(direction.clone().multiplyScalar(length / 2 + 0.08));
-
-        return (
-          <group key={flow.id}>
-            <AirflowCurtain center={inlet} direction={direction} width={spread * 1.25} height={1.65} color={color} />
-            <AirflowCurtain center={outlet} direction={direction} width={spread * 1.05} height={1.25} color={color} />
-            {streams.map((stream, index) => (
-              <group key={`${flow.id}-${index}`}>
-                <FlowTube points={stream.floor} color={color} radius={isSelected ? 0.025 : 0.017} opacity={0.72} />
-                <FlowTube points={stream.volume} color={color} radius={isSelected ? 0.035 : 0.024} opacity={0.86} />
-                <AirflowArrowHead
-                  position={stream.volume[2].clone().add(direction.clone().multiplyScalar(0.08))}
-                  direction={direction}
-                  color={color}
-                  scale={0.86 + flow.strength * 0.55}
-                />
-              </group>
-            ))}
-            <LabelSprite text={`${Math.round(flow.strength * 100)}%`} position={[center.x, 1.58, center.z]} accent="#9af8ff" />
-          </group>
-        );
-      })}
-    </>
   );
 }
 
@@ -2043,44 +1693,6 @@ function BaguaOverlay({
   );
 }
 
-const compassMountains = [
-  "子",
-  "癸",
-  "丑",
-  "艮",
-  "寅",
-  "甲",
-  "卯",
-  "乙",
-  "辰",
-  "巽",
-  "巳",
-  "丙",
-  "午",
-  "丁",
-  "未",
-  "坤",
-  "申",
-  "庚",
-  "酉",
-  "辛",
-  "戌",
-  "乾",
-  "亥",
-  "壬"
-];
-
-const compassTrigrams = [
-  { trigram: "坎", star: "一", tone: "#65d6ff" },
-  { trigram: "艮", star: "八", tone: "#ffd166" },
-  { trigram: "震", star: "三", tone: "#71e59f" },
-  { trigram: "巽", star: "四", tone: "#8cebd0" },
-  { trigram: "离", star: "九", tone: "#ff795f" },
-  { trigram: "坤", star: "二", tone: "#e2c38d" },
-  { trigram: "兑", star: "七", tone: "#e7eef5" },
-  { trigram: "乾", star: "六", tone: "#d6c1ff" }
-];
-
 const compassMountainLabels = [
   "子",
   "癸",
@@ -2581,8 +2193,8 @@ export function ThreeSceneCanvas({
   layout,
   selectedRoomId,
   selectedWallId,
-  heatmap,
-  airflow,
+  heatmap: _heatmap,
+  airflow: _airflow,
   heatField,
   flowField,
   fengshui,

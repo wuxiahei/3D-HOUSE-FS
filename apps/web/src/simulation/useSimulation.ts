@@ -3,7 +3,7 @@
 import type { HouseLayout } from "@fengshui/core";
 import { generateSimulation } from "@fengshui/simulation";
 import type { SimulationResult } from "@fengshui/simulation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface WorkerResponse {
   id: number;
@@ -22,8 +22,7 @@ function createSimulationWorker() {
 }
 
 export function useSimulation(layout: HouseLayout) {
-  const initial = useMemo(() => generateSimulation(layout), []);
-  const [simulation, setSimulation] = useState<SimulationResult>(initial);
+  const [simulation, setSimulation] = useState<SimulationResult>(() => generateSimulation(layout));
   const [pending, setPending] = useState(false);
   const workerRef = useRef<Worker | null>(null);
   const requestIdRef = useRef(0);

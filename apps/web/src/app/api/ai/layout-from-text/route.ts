@@ -718,7 +718,6 @@ export async function POST(request: Request) {
 
   let providerConfig: ProviderConfig | null = null;
   let configured = false;
-  let providerInfo: AiDraftResponse["provider"] | undefined;
 
   if (payload.providerMode === "server") {
     const serverResult = getServerProviderConfig(payload.serverPassword);
@@ -754,7 +753,7 @@ export async function POST(request: Request) {
     });
   }
 
-  providerInfo = {
+  const providerInfo = {
     name: providerConfig.name,
     model: providerConfig.model,
     baseUrl: providerConfig.baseUrl
