@@ -34,7 +34,7 @@ import { SceneViewport } from "./Scene/SceneViewport";
 import { LayoutPersistencePanel } from "./Templates/LayoutPersistencePanel";
 import { TemplatePicker } from "./Templates/TemplatePicker";
 import { useSimulation } from "../simulation/useSimulation";
-import { stringifyLayout } from "../utils/serializers/layout-storage";
+import { SAVED_LAYOUT_STORAGE_KEY, stringifyLayout } from "../utils/serializers/layout-storage";
 
 export interface SceneLayers {
   heat: boolean;
@@ -104,6 +104,8 @@ interface ServerAiStatus {
 }
 
 const DOCK_HEIGHT_STORAGE_KEY = "3d-house-fs:dock-height";
+const LAYOUT_SAVE_TIME_KEY = "3d-house-fs:layout-saved-at";
+const MAX_HISTORY_ITEMS = 30;
 const DEFAULT_DOCK_HEIGHT = 180;
 const MIN_DOCK_HEIGHT = 120;
 const MAX_DOCK_HEIGHT_RATIO = 0.58;
@@ -112,7 +114,27 @@ function cloneLayout(layout: HouseLayout): HouseLayout {
   return JSON.parse(JSON.stringify(layout)) as HouseLayout;
 }
 
-function ToolIcon({ name }: { name: "select" | "wall" | "door" | "window" | "ac" | "sensor" | "heat" | "air" | "compass" | "walls" | "eye" | "eye-off" }) {
+function ToolIcon({
+  name
+}: {
+  name:
+    | "select"
+    | "wall"
+    | "door"
+    | "window"
+    | "ac"
+    | "sensor"
+    | "heat"
+    | "air"
+    | "compass"
+    | "walls"
+    | "eye"
+    | "eye-off"
+    | "undo"
+    | "redo"
+    | "save"
+    | "download";
+}) {
   if (name === "eye") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -131,6 +153,34 @@ function ToolIcon({ name }: { name: "select" | "wall" | "door" | "window" | "ac"
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M5 3l11 9-5 1.3 3.2 6.1-2.3 1.2-3.2-6-3.7 3.4V3z" />
+      </svg>
+    );
+  }
+  if (name === "undo") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9 7H4v5h2V9.9A7 7 0 0118.2 14a4 4 0 01-6.9 2.8l-1.4 1.4A6 6 0 1020.2 14 9 9 0 006.8 6.2L6.7 5H4v2z" />
+      </svg>
+    );
+  }
+  if (name === "redo") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M15 7h5v5h-2V9.9A7 7 0 005.8 14a4 4 0 006.9 2.8l1.4 1.4A6 6 0 013.8 14 9 9 0 0117.2 6.2l.1-1.2H20v2z" />
+      </svg>
+    );
+  }
+  if (name === "save") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 4h12l2 2v14H5zm2 2v12h10V8.2L15.8 7H15v5H8V6zm3 0v4h3V6zm-1 9h6v2H9z" />
+      </svg>
+    );
+  }
+  if (name === "download") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M11 4h2v8l3-3 1.4 1.4L12 15.8l-5.4-5.4L8 9l3 3zM5 18h14v2H5z" />
       </svg>
     );
   }
@@ -199,6 +249,9 @@ function ToolIcon({ name }: { name: "select" | "wall" | "door" | "window" | "ac"
 
 export function AppShell() {
   const [layout, setLayout] = useState<HouseLayout>(() => createTemplateLayout("compact-two-room"));
+  const [undoStack, setUndoStack] = useState<HouseLayout[]>([]);
+  const [redoStack, setRedoStack] = useState<HouseLayout[]>([]);
+  const [layoutSaveStatus, setLayoutSaveStatus] = useState("Ready");
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(layout.rooms[0]?.id ?? null);
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("select");
@@ -335,9 +388,82 @@ export function AppShell() {
     });
   }, [aiProviderMode]);
 
+  function exportFileName(targetLayout: HouseLayout) {
+    const projectName = targetLayout.metadata.projectName.trim() || "house-layout";
+    const safeName = projectName.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-");
+    return `${safeName}.json`;
+  }
+
+  function syncSelectionForLayout(nextLayout: HouseLayout) {
+    setSelectedRoomId((current) =>
+      current && nextLayout.rooms.some((room) => room.id === current) ? current : nextLayout.rooms[0]?.id ?? null
+    );
+    setSelectedWallId((current) => (current && nextLayout.walls.some((wall) => wall.id === current) ? current : null));
+  }
+
+  function commitLayoutChange(update: HouseLayout | ((current: HouseLayout) => HouseLayout), options: { history?: boolean } = {}) {
+    const shouldRecordHistory = options.history !== false;
+    setLayout((current) => {
+      const nextLayout = typeof update === "function" ? update(current) : update;
+      if (nextLayout === current) {
+        return current;
+      }
+      if (shouldRecordHistory) {
+        setUndoStack((stack) => [...stack.slice(Math.max(0, stack.length - MAX_HISTORY_ITEMS + 1)), cloneLayout(current)]);
+        setRedoStack([]);
+        setLayoutSaveStatus("Unsaved changes");
+      }
+      return nextLayout;
+    });
+  }
+
+  function undoLayout() {
+    if (undoStack.length === 0) {
+      return;
+    }
+    const previous = cloneLayout(undoStack[undoStack.length - 1]);
+    setUndoStack((stack) => stack.slice(0, -1));
+    setRedoStack((stack) => [...stack.slice(Math.max(0, stack.length - MAX_HISTORY_ITEMS + 1)), cloneLayout(layout)]);
+    setLayout(previous);
+    syncSelectionForLayout(previous);
+    setDraftWall(null);
+    setLayoutSaveStatus("Undo applied");
+  }
+
+  function redoLayout() {
+    if (redoStack.length === 0) {
+      return;
+    }
+    const next = cloneLayout(redoStack[redoStack.length - 1]);
+    setRedoStack((stack) => stack.slice(0, -1));
+    setUndoStack((stack) => [...stack.slice(Math.max(0, stack.length - MAX_HISTORY_ITEMS + 1)), cloneLayout(layout)]);
+    setLayout(next);
+    syncSelectionForLayout(next);
+    setDraftWall(null);
+    setLayoutSaveStatus("Redo applied");
+  }
+
+  function saveLayoutToBrowser() {
+    const now = new Date().toLocaleString("zh-CN", { hour12: false });
+    window.localStorage.setItem(SAVED_LAYOUT_STORAGE_KEY, stringifyLayout(layout));
+    window.localStorage.setItem(LAYOUT_SAVE_TIME_KEY, now);
+    setLayoutSaveStatus(`Saved ${now}`);
+  }
+
+  function exportLayoutJson() {
+    const blob = new Blob([stringifyLayout(layout)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = exportFileName(layout);
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setLayoutSaveStatus("JSON exported");
+  }
+
   function applyTemplate(templateId: TemplateId) {
     const nextLayout = createTemplateLayout(templateId);
-    setLayout(nextLayout);
+    commitLayoutChange(nextLayout);
     setSelectedRoomId(nextLayout.rooms[0]?.id ?? null);
     setSelectedWallId(null);
     setDraftWall(null);
@@ -391,7 +517,7 @@ export function AppShell() {
 
   function applyAiDraftLayout(nextLayout: HouseLayout) {
     const syncedLayout = syncDerivedLayoutData(nextLayout);
-    setLayout(syncedLayout);
+    commitLayoutChange(syncedLayout);
     setSelectedRoomId(syncedLayout.rooms[0]?.id ?? null);
     setSelectedWallId(null);
     setDraftWall(null);
@@ -606,7 +732,7 @@ export function AppShell() {
 
   function restoreLayout(nextLayout: HouseLayout) {
     const syncedLayout = syncDerivedLayoutData(nextLayout);
-    setLayout(syncedLayout);
+    commitLayoutChange(syncedLayout);
     setSelectedRoomId(syncedLayout.rooms[0]?.id ?? null);
     setSelectedWallId(null);
     setDraftWall(null);
@@ -614,15 +740,15 @@ export function AppShell() {
   }
 
   function updateMetadata(key: keyof HouseLayout["metadata"], value: string | number) {
-    setLayout((current) => ({ ...current, metadata: { ...current.metadata, [key]: value } }));
+    commitLayoutChange((current) => ({ ...current, metadata: { ...current.metadata, [key]: value } }));
   }
 
   function updateWeather(key: keyof HouseLayout["weather"], value: number) {
-    setLayout((current) => ({ ...current, weather: { ...current.weather, [key]: value } }));
+    commitLayoutChange((current) => ({ ...current, weather: { ...current.weather, [key]: value } }));
   }
 
   function updateOrientation(key: "facingDegrees" | "frontDoorDegrees", value: number) {
-    setLayout((current) =>
+    commitLayoutChange((current) =>
       syncDerivedLayoutData({
         ...current,
         orientation: { ...current.orientation, [key]: value }
@@ -631,7 +757,7 @@ export function AppShell() {
   }
 
   function updateRoomDimensions(roomId: string, key: "width" | "depth", value: number) {
-    setLayout((current) =>
+    commitLayoutChange((current) =>
       syncDerivedLayoutData({
         ...current,
         rooms: current.rooms.map((room) =>
@@ -642,7 +768,7 @@ export function AppShell() {
   }
 
   function updateRoomOrigin(roomId: string, axis: "x" | "y", value: number) {
-    setLayout((current) =>
+    commitLayoutChange((current) =>
       syncDerivedLayoutData({
         ...current,
         rooms: current.rooms.map((room) =>
@@ -655,7 +781,7 @@ export function AppShell() {
   }
 
   function nudgeRoom(roomId: string, axis: "x" | "y", delta: number) {
-    setLayout((current) => {
+    commitLayoutChange((current) => {
       const next = cloneLayout(current);
       next.rooms = next.rooms.map((room) =>
         room.id === roomId
@@ -667,7 +793,7 @@ export function AppShell() {
   }
 
   function addSensorPoint() {
-    setLayout((current) => {
+    commitLayoutChange((current) => {
       const nextNumber = current.sensors.length + 1;
       const sensor: SensorPoint = {
         id: `sensor-${Date.now()}`,
@@ -681,7 +807,7 @@ export function AppShell() {
   }
 
   function updateSensorPoint(sensorId: string, patch: Partial<SensorPoint>) {
-    setLayout((current) => ({
+    commitLayoutChange((current) => ({
       ...current,
       sensors: current.sensors.map((sensor) =>
         sensor.id === sensorId
@@ -698,11 +824,11 @@ export function AppShell() {
   }
 
   function deleteSensorPoint(sensorId: string) {
-    setLayout((current) => ({ ...current, sensors: current.sensors.filter((sensor) => sensor.id !== sensorId) }));
+    commitLayoutChange((current) => ({ ...current, sensors: current.sensors.filter((sensor) => sensor.id !== sensorId) }));
   }
 
   function addOpening(wallId: string, type: Opening["type"]) {
-    setLayout((current) => {
+    commitLayoutChange((current) => {
       const opening = createOpeningForWall(current, wallId, type);
       if (!opening) {
         return current;
@@ -712,7 +838,7 @@ export function AppShell() {
   }
 
   function updateOpening(openingId: string, patch: Partial<Opening>) {
-    setLayout((current) => {
+    commitLayoutChange((current) => {
       const wallMap = new Map(current.walls.map((wall) => [wall.id, wall]));
       return syncDerivedLayoutData({
         ...current,
@@ -729,11 +855,11 @@ export function AppShell() {
   }
 
   function deleteOpening(openingId: string) {
-    setLayout((current) => syncDerivedLayoutData({ ...current, openings: current.openings.filter((opening) => opening.id !== openingId) }));
+    commitLayoutChange((current) => syncDerivedLayoutData({ ...current, openings: current.openings.filter((opening) => opening.id !== openingId) }));
   }
 
   function addDevice(roomId: string, type: ClimateDevice["type"]) {
-    setLayout((current) => {
+    commitLayoutChange((current) => {
       const device = createDeviceForRoom(current, roomId, type);
       if (!device) {
         return current;
@@ -743,7 +869,7 @@ export function AppShell() {
   }
 
   function updateDevice(deviceId: string, patch: Partial<ClimateDevice>) {
-    setLayout((current) =>
+    commitLayoutChange((current) =>
       syncDerivedLayoutData({
         ...current,
         devices: (current.devices ?? []).map((device) =>
@@ -754,18 +880,18 @@ export function AppShell() {
   }
 
   function deleteDevice(deviceId: string) {
-    setLayout((current) => syncDerivedLayoutData({ ...current, devices: (current.devices ?? []).filter((device) => device.id !== deviceId) }));
+    commitLayoutChange((current) => syncDerivedLayoutData({ ...current, devices: (current.devices ?? []).filter((device) => device.id !== deviceId) }));
   }
 
   function replaceLayout(nextLayout: HouseLayout) {
-    setLayout(nextLayout);
+    commitLayoutChange(nextLayout);
   }
 
   function deleteSelectedWall() {
     if (!selectedWallId) {
       return;
     }
-    setLayout((current) => syncDerivedLayoutData({ ...current, walls: current.walls.filter((wall) => wall.id !== selectedWallId) }));
+    commitLayoutChange((current) => syncDerivedLayoutData({ ...current, walls: current.walls.filter((wall) => wall.id !== selectedWallId) }));
     setSelectedWallId(null);
   }
 
@@ -861,6 +987,21 @@ export function AppShell() {
           <ToolIcon name={layers.walls ? "eye" : "eye-off"} />
           <span>结构</span>
         </button>
+        <div className="quick-actions" aria-label="layout actions">
+          <button type="button" disabled={undoStack.length === 0} title="Undo" aria-label="Undo" onClick={undoLayout}>
+            <ToolIcon name="undo" />
+          </button>
+          <button type="button" disabled={redoStack.length === 0} title="Redo" aria-label="Redo" onClick={redoLayout}>
+            <ToolIcon name="redo" />
+          </button>
+          <button type="button" title="Save to browser" aria-label="Save to browser" onClick={saveLayoutToBrowser}>
+            <ToolIcon name="save" />
+          </button>
+          <button type="button" title="Export JSON" aria-label="Export JSON" onClick={exportLayoutJson}>
+            <ToolIcon name="download" />
+          </button>
+          <span>{layoutSaveStatus}</span>
+        </div>
         <div className={`status-pill ${simulationPending ? "computing" : ""}`}>
           {simulationPending ? (
             <>

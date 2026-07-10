@@ -62,6 +62,7 @@ button {
 
 button:hover:not(:disabled) {
   border-color: var(--cyan);
+  background: #263131;
 }
 
 button:disabled {
@@ -89,18 +90,23 @@ textarea {
   grid-template-rows: 52px minmax(0, 1fr) var(--dock-height, 152px);
   width: 100vw;
   height: 100vh;
-  background: var(--bg-0);
+  background:
+    linear-gradient(135deg, rgba(40, 215, 167, 0.05), transparent 32%),
+    linear-gradient(225deg, rgba(255, 209, 102, 0.04), transparent 36%),
+    var(--bg-0);
 }
 
 .studio-topbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto auto auto;
+  grid-template-columns: minmax(180px, 1fr) auto auto auto auto auto;
   align-items: center;
   gap: var(--space-3);
   height: 52px;
   padding: 0 var(--space-3);
   border-bottom: 1px solid var(--line);
-  background: var(--topbar);
+  background: rgba(15, 20, 22, 0.94);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(12px);
 }
 
 .brand-block {
@@ -112,6 +118,7 @@ textarea {
 
 .brand-block strong {
   color: var(--cyan);
+  letter-spacing: 0.04em;
 }
 
 .brand-block span {
@@ -159,6 +166,36 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+}
+
+.quick-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.quick-actions button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+}
+
+.quick-actions svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.quick-actions span {
+  max-width: 132px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .analysis-layer-group {
@@ -279,7 +316,7 @@ textarea {
   gap: 8px;
   padding: 10px 8px;
   border-right: 1px solid var(--line);
-  background: #111616;
+  background: linear-gradient(180deg, #111818, #0f1414);
 }
 
 .tool-rail button {
@@ -314,6 +351,9 @@ textarea {
   position: relative;
   min-width: 0;
   min-height: 0;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(57, 183, 255, 0.08), transparent 46%),
+    linear-gradient(180deg, #0f1720, #0c1115);
 }
 
 .viewport-shell {
@@ -322,6 +362,14 @@ textarea {
   height: 100%;
   overflow: hidden;
   background: #0f1720;
+}
+
+.viewport-shell::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.38);
 }
 
 .three-canvas {
@@ -404,7 +452,7 @@ textarea {
   min-height: 0;
   overflow: auto;
   border-left: 1px solid var(--line);
-  background: var(--panel);
+  background: linear-gradient(180deg, rgba(25, 34, 37, 0.98), rgba(19, 26, 29, 0.98));
 }
 
 .inspector-fab {
@@ -520,7 +568,8 @@ textarea {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel-2);
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .mini-action-row button {
@@ -667,7 +716,7 @@ textarea {
   height: 100%;
   overflow: auto;
   padding: 12px 14px;
-  background: #151a1a;
+  background: linear-gradient(180deg, #171f20, #121818);
 }
 
 .analysis-controls {
@@ -1361,6 +1410,10 @@ textarea {
     grid-template-rows: 48px minmax(0, 1fr) var(--dock-height, 220px);
   }
 
+  .quick-actions span {
+    display: none;
+  }
+
   .studio-body {
     grid-template-columns: 48px minmax(0, 1fr);
   }
@@ -1396,10 +1449,18 @@ textarea {
   }
 
   .studio-topbar {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     height: 88px;
     gap: 6px;
     align-content: center;
+  }
+
+  .workspace-switch {
+    grid-column: 1 / -1;
+  }
+
+  .quick-actions span {
+    display: none;
   }
 
   .layer-strip,

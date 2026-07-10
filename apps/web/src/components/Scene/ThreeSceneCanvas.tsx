@@ -2081,6 +2081,118 @@ const compassTrigrams = [
   { trigram: "乾", star: "六", tone: "#d6c1ff" }
 ];
 
+const compassMountainLabels = [
+  "子",
+  "癸",
+  "丑",
+  "艮",
+  "寅",
+  "甲",
+  "卯",
+  "乙",
+  "辰",
+  "巽",
+  "巳",
+  "丙",
+  "午",
+  "丁",
+  "未",
+  "坤",
+  "申",
+  "庚",
+  "酉",
+  "辛",
+  "戌",
+  "乾",
+  "亥",
+  "壬"
+];
+
+const compassTrigramLayers = [
+  { trigram: "坎", star: "一白", tone: "#65d6ff" },
+  { trigram: "艮", star: "八白", tone: "#ffd166" },
+  { trigram: "震", star: "三碧", tone: "#71e59f" },
+  { trigram: "巽", star: "四绿", tone: "#8cebd0" },
+  { trigram: "离", star: "九紫", tone: "#ff795f" },
+  { trigram: "坤", star: "二黑", tone: "#e2c38d" },
+  { trigram: "兑", star: "七赤", tone: "#e7eef5" },
+  { trigram: "乾", star: "六白", tone: "#d6c1ff" }
+];
+
+const compassHexagramLabels = [
+  "乾",
+  "姤",
+  "遁",
+  "否",
+  "观",
+  "剥",
+  "晋",
+  "大有",
+  "坎",
+  "节",
+  "屯",
+  "既济",
+  "革",
+  "丰",
+  "明夷",
+  "师",
+  "艮",
+  "贲",
+  "大畜",
+  "损",
+  "睽",
+  "履",
+  "中孚",
+  "渐",
+  "震",
+  "豫",
+  "解",
+  "恒",
+  "升",
+  "井",
+  "大过",
+  "随",
+  "巽",
+  "小畜",
+  "家人",
+  "益",
+  "无妄",
+  "噬嗑",
+  "颐",
+  "蛊",
+  "离",
+  "旅",
+  "鼎",
+  "未济",
+  "蒙",
+  "涣",
+  "讼",
+  "同人",
+  "坤",
+  "复",
+  "临",
+  "泰",
+  "大壮",
+  "夬",
+  "需",
+  "比",
+  "兑",
+  "困",
+  "萃",
+  "咸",
+  "蹇",
+  "谦",
+  "小过",
+  "归妹"
+];
+
+const compassInnerSystems = [
+  { label: "方位", tone: "#65d6ff" },
+  { label: "六十四卦", tone: "#ffd166" },
+  { label: "紫微", tone: "#d6c1ff" },
+  { label: "风水盘", tone: "#71e59f" }
+];
+
 function CompassSectorBand({
   innerRadius,
   outerRadius,
@@ -2151,6 +2263,52 @@ function CompassNeedle({
   );
 }
 
+function CompassScanEffect({ radius }: { radius: number }) {
+  const scanRef = useRef<THREE.Group>(null);
+
+  useFrame((state) => {
+    if (scanRef.current) {
+      scanRef.current.rotation.y = state.clock.elapsedTime * 0.28;
+    }
+  });
+
+  return (
+    <group ref={scanRef} position={[0, 0.052, 0]} raycast={noRaycast}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} raycast={noRaycast}>
+        <ringGeometry args={[0.72, radius + 0.12, 64, 1, -0.04, 0.22]} />
+        <meshBasicMaterial color="#7df9ff" transparent opacity={0.13} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[radius * 0.54, 0.018, 0]} raycast={noRaycast}>
+        <boxGeometry args={[radius * 0.92, 0.01, 0.015]} />
+        <meshBasicMaterial color="#7df9ff" transparent opacity={0.32} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+}
+
+function CompassLayerLabel({
+  label,
+  tone,
+  radius,
+  index,
+  total,
+  y = 0.35,
+  scale = [0.48, 0.16, 1]
+}: {
+  label: string;
+  tone: string;
+  radius: number;
+  index: number;
+  total: number;
+  y?: number;
+  scale?: [number, number, number];
+}) {
+  const angle = (index / total) * Math.PI * 2 - Math.PI / 2;
+  const x = Math.cos(angle);
+  const z = Math.sin(angle);
+  return <LabelSprite text={label} position={[x * radius, y, z * radius]} accent={tone} boxed={false} scale={scale} />;
+}
+
 function CompassRing({
   layout,
   fengshui,
@@ -2180,14 +2338,33 @@ function CompassRing({
   const tickRadius = radius - 0.16;
   const sectorInnerRadius = radius - 1.42;
   const sectorOuterRadius = radius - 0.08;
+  const hexagramRadius = radius - 1.72;
+  const systemRadius = radius - 2.06;
   const sectorSpan = (Math.PI * 2) / 8 - 0.035;
 
   return (
     <group position={[0, 0.2, 0]}>
+      <mesh position={[0, -0.09, 0]} raycast={noRaycast}>
+        <cylinderGeometry args={[radius + 0.34, radius + 0.5, 0.16, 160]} />
+        <meshStandardMaterial
+          color="#11191c"
+          emissive="#0e3742"
+          emissiveIntensity={0.2}
+          roughness={0.42}
+          metalness={0.28}
+          transparent
+          opacity={0.92}
+        />
+      </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.025, 0]}>
         <circleGeometry args={[radius + 0.24, 160]} />
-        <meshBasicMaterial color="#d9aa25" transparent opacity={0.18} depthWrite={false} />
+        <meshBasicMaterial color="#d9aa25" transparent opacity={0.2} depthWrite={false} />
       </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.018, 0]} raycast={noRaycast}>
+        <ringGeometry args={[radius - 2.3, radius + 0.22, 160]} />
+        <meshBasicMaterial color="#67e8f9" transparent opacity={0.05} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+      <CompassScanEffect radius={radius} />
 
       {mode === "professional"
         ? fengshui.compass.map((sector, index) => (
@@ -2203,10 +2380,14 @@ function CompassRing({
           ))
         : null}
 
-      {[radius, innerRadius, midRadius, radius - 1.08, radius - 1.42].map((ringRadius, index) => (
+      {[radius, innerRadius, midRadius, radius - 1.08, radius - 1.42, hexagramRadius, systemRadius].map((ringRadius, index) => (
         <mesh key={ringRadius} rotation={[-Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[ringRadius, index === 0 ? 0.035 : 0.018, 12, 128]} />
-          <meshStandardMaterial color={index === 0 ? "#101820" : "#d8b451"} emissive={index === 0 ? "#000000" : "#3a2b00"} emissiveIntensity={0.1} />
+          <torusGeometry args={[ringRadius, index === 0 ? 0.045 : index > 4 ? 0.012 : 0.018, 12, 128]} />
+          <meshStandardMaterial
+            color={index === 0 ? "#071114" : index > 4 ? "#65d6ff" : "#d8b451"}
+            emissive={index === 0 ? "#000000" : index > 4 ? "#0b5364" : "#3a2b00"}
+            emissiveIntensity={index > 4 ? 0.18 : 0.1}
+          />
         </mesh>
       ))}
 
@@ -2235,39 +2416,102 @@ function CompassRing({
       })}
 
       {mode === "professional"
-        ? compassMountains.map((label, index) => {
-            const angle = (index / compassMountains.length) * Math.PI * 2 - Math.PI / 2;
+        ? Array.from({ length: 64 }, (_, index) => {
+            const angle = (index / 64) * Math.PI * 2 - Math.PI / 2;
             const x = Math.cos(angle);
             const z = Math.sin(angle);
+            const tickLength = index % 8 === 0 ? 0.19 : 0.1;
             return (
-              <LabelSprite
-                key={label}
-                text={label}
-                position={[x * (radius - 0.52), 0.32, z * (radius - 0.52)]}
-                accent={index % 3 === 0 ? "#101820" : "#5b4212"}
-                boxed={false}
-                scale={[0.38, 0.14, 1]}
-              />
+              <mesh
+                key={`hex-tick-${index}`}
+                position={[x * (hexagramRadius + tickLength / 2), 0.034, z * (hexagramRadius + tickLength / 2)]}
+                rotation={[0, -angle, 0]}
+                raycast={noRaycast}
+              >
+                <boxGeometry args={[tickLength, 0.012, index % 8 === 0 ? 0.024 : 0.011]} />
+                <meshStandardMaterial color={index % 8 === 0 ? "#fff1a8" : "#65d6ff"} emissive="#0b5364" emissiveIntensity={0.12} />
+              </mesh>
             );
           })
         : null}
 
       {mode === "professional"
-        ? compassTrigrams.map((item, index) => {
-            const angle = (index / compassTrigrams.length) * Math.PI * 2 - Math.PI / 2;
+        ? compassInnerSystems.map((item, index) => {
+            const angle = (index / compassInnerSystems.length) * Math.PI * 2 - Math.PI / 2;
             const x = Math.cos(angle);
             const z = Math.sin(angle);
             return (
-              <LabelSprite
-                key={`${item.trigram}-${item.star}`}
-                text={`${item.trigram}${item.star}`}
-                position={[x * (radius - 1.22), 0.34, z * (radius - 1.22)]}
-                accent={item.tone}
-                boxed={false}
-                scale={[0.62, 0.2, 1]}
-              />
+              <mesh
+                key={`system-spoke-${item.label}`}
+                position={[x * (systemRadius + 0.42), 0.04, z * (systemRadius + 0.42)]}
+                rotation={[0, -angle, 0]}
+                raycast={noRaycast}
+              >
+                <boxGeometry args={[0.8, 0.014, 0.018]} />
+                <meshBasicMaterial color={item.tone} transparent opacity={0.35} depthWrite={false} />
+              </mesh>
             );
           })
+        : null}
+
+      {mode === "professional"
+        ? compassMountainLabels.map((label, index) => (
+            <CompassLayerLabel
+              key={`mountain-${index}-${label}`}
+              label={label}
+              tone={index % 3 === 0 ? "#f8e2a0" : "#d8b451"}
+              radius={radius - 0.52}
+              index={index}
+              total={compassMountainLabels.length}
+            />
+          ))
+        : null}
+
+      {mode === "professional"
+        ? compassTrigramLayers.map((item, index) => (
+            <CompassLayerLabel
+              key={`${item.trigram}-${item.star}`}
+              label={`${item.trigram}${item.star}`}
+              tone={item.tone}
+              radius={radius - 1.22}
+              index={index}
+              total={compassTrigramLayers.length}
+              y={0.38}
+              scale={[0.68, 0.2, 1]}
+            />
+          ))
+        : null}
+
+      {mode === "professional"
+        ? compassHexagramLabels.map((label, index) =>
+            index % 2 === 0 ? (
+              <CompassLayerLabel
+                key={`hex-${index}-${label}`}
+                label={label}
+                tone={index % 8 === 0 ? "#fff1a8" : "#b9f7ff"}
+                radius={hexagramRadius}
+                index={index}
+                total={compassHexagramLabels.length}
+                y={0.31}
+                scale={[0.34, 0.12, 1]}
+              />
+            ) : null
+          )
+        : null}
+
+      {mode === "professional"
+        ? compassInnerSystems.map((item, index) => (
+            <CompassLayerLabel
+              key={item.label}
+              label={item.label}
+              tone={item.tone}
+              radius={systemRadius}
+              index={index}
+              total={compassInnerSystems.length}
+              y={0.36}
+              scale={[0.82, 0.24, 1]}
+            />
+          ))
         : null}
 
       {fengshui.compass.map((sector, index) => {
@@ -2324,7 +2568,7 @@ function CompassRing({
       </sprite>
 
       <LabelSprite
-        text={`${layout.orientation.facingDegrees}度 / 门${layout.orientation.frontDoorDegrees}度`}
+        text={`坐向 ${layout.orientation.facingDegrees}° / 门向 ${layout.orientation.frontDoorDegrees}°`}
         position={[0, 0.58, 0]}
         accent="#19c2ff"
         scale={[1.52, 0.48, 1]}
