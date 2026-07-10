@@ -13,6 +13,7 @@ import {
 import type { ClimateDevice, HouseLayout, LayoutPoint, Opening, SensorPoint, TemplateId } from "@fengshui/core";
 import type { ChangeEvent, CSSProperties, PointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { requestBrowserAiDraft } from "../ai/browser-provider";
 import {
   AI_SETTINGS_STORAGE_KEY,
   DEFAULT_BROWSER_AI_CONFIG,
@@ -120,9 +121,11 @@ function ToolIcon({
   name:
     | "select"
     | "wall"
+    | "move"
     | "door"
     | "window"
     | "ac"
+    | "measure"
     | "sensor"
     | "heat"
     | "air"
@@ -311,6 +314,7 @@ export function AppShell() {
 
   const validation = useMemo(() => validateLayout(layout), [layout]);
   const { simulation, pending: simulationPending } = useSimulation(layout);
+  const simulationStatus = simulationPending ? "computing" : validation.length === 0 ? "ready" : "invalid";
   const heatmap = simulation.heatmap;
   const airflow = simulation.airflow;
   const fengshui = useMemo(() => analyzeFengshui(layout), [layout]);
@@ -676,11 +680,35 @@ export function AppShell() {
     });
 
     try {
+      if (aiProviderMode === "browser") {
+        const payload = await requestBrowserAiDraft({
+          prompt,
+          referenceFiles: aiReferenceFiles,
+          config: browserAiConfig,
+          fallbackTemplateId: templateFromPrompt(prompt)
+        });
+
+        if (!payload.layout) {
+          generateLocalAiDraft(payload.message, payload.configured ? "warning" : "idle");
+          return;
+        }
+
+        applyAiDraftLayout(payload.layout);
+        rememberLatestAiDraft(payload.layout);
+        const providerText = payload.provider?.model ? `（${payload.provider.model}）` : "";
+        setAiDraftStatus({
+          tone: "success",
+          text: payload.rationale
+            ? `浏览器本地 AI${providerText} 已生成建模 JSON。 ${payload.rationale}`
+            : payload.message
+        });
+        return;
+      }
+
       const formData = new FormData();
       formData.append("prompt", prompt);
       formData.append("providerMode", aiProviderMode);
       formData.append("serverPassword", serverAiPassword.trim());
-      formData.append("browserConfig", JSON.stringify(browserAiConfig));
       aiReferenceFiles.forEach((file) => {
         formData.append("referenceImages", file);
       });
@@ -915,8 +943,6 @@ export function AppShell() {
     setAnalysisControls((current) => ({ ...current, [key]: value }));
   }
 
-  const selectedRoomWalls = selectedRoom ? layout.walls.filter((wall) => wall.roomId === selectedRoom.id) : [];
-  const quickOpeningWallId = selectedWallId ?? selectedRoomWalls[0]?.id ?? layout.walls[0]?.id ?? null;
   const shellStyle = { "--dock-height": `${dockHeight}px` } as CSSProperties;
 
   return (
@@ -1002,7 +1028,11 @@ export function AppShell() {
           </button>
           <span>{layoutSaveStatus}</span>
         </div>
-        <div className={`status-pill ${simulationPending ? "computing" : ""}`}>
+        <div
+          className={`status-pill ${simulationPending ? "computing" : ""}`}
+          data-testid="simulation-status"
+          data-state={simulationStatus}
+        >
           {simulationPending ? (
             <>
               <span className="status-spinner" aria-hidden="true" />
@@ -1026,32 +1056,25 @@ export function AppShell() {
             <ToolIcon name="wall" />
             <em>画墙</em>
           </button>
-          <button
-            type="button"
-            disabled={!quickOpeningWallId}
-            title={quickOpeningWallId ? "在选中墙体上加门" : "请先选择一面墙"}
-            onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "door")}
-          >
+          <button type="button" className={editorMode === "move" ? "active" : ""} title="移动" onClick={() => setEditorMode("move")}>
+            <ToolIcon name="move" />
+            <em>移动</em>
+          </button>
+          <button type="button" className={editorMode === "door" ? "active" : ""} title="门工具" onClick={() => setEditorMode("door")}>
             <ToolIcon name="door" />
-            <em>加门</em>
+            <em>门</em>
           </button>
-          <button
-            type="button"
-            disabled={!quickOpeningWallId}
-            title={quickOpeningWallId ? "在选中墙体上加窗" : "请先选择一面墙"}
-            onClick={() => quickOpeningWallId && addOpening(quickOpeningWallId, "window")}
-          >
+          <button type="button" className={editorMode === "window" ? "active" : ""} title="窗工具" onClick={() => setEditorMode("window")}>
             <ToolIcon name="window" />
-            <em>加窗</em>
+            <em>窗</em>
           </button>
-          <button
-            type="button"
-            disabled={!selectedRoom}
-            title={selectedRoom ? "为选中房间加空调" : "请先选择一个房间"}
-            onClick={() => selectedRoom && addDevice(selectedRoom.id, "ac")}
-          >
+          <button type="button" className={editorMode === "device" ? "active" : ""} title="设备工具" onClick={() => setEditorMode("device")}>
             <ToolIcon name="ac" />
-            <em>空调</em>
+            <em>设备</em>
+          </button>
+          <button type="button" className={editorMode === "measure" ? "active" : ""} title="测量" onClick={() => setEditorMode("measure")}>
+            <ToolIcon name="measure" />
+            <em>测量</em>
           </button>
           <button type="button" title="加温度点" onClick={addSensorPoint}>
             <ToolIcon name="sensor" />
@@ -1160,7 +1183,7 @@ export function AppShell() {
         >
           <span />
         </button>
-        <div className="dock-main">
+        <div className="dock-main" data-testid="template-controls">
           {workspaceMode === "modeling" ? (
             <ModelingPanel
               layout={layout}

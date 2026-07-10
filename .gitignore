@@ -1,8 +1,12 @@
 node_modules
 .next
 dist
-coverage
+coverage/
 .turbo
+*.tsbuildinfo
+output/
+playwright-report/
+test-results/
 .env
 .env.local
 .env.development.local

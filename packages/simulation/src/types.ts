@@ -83,3 +83,27 @@ export interface SimulationResult {
   heatmap: RoomHeatSummary[];
   airflow: RoomFlowSummary[];
 }
+
+export const SIMULATION_WORKER_PROTOCOL_VERSION = 1 as const;
+
+export interface SimulationWorkerRequest {
+  protocolVersion: typeof SIMULATION_WORKER_PROTOCOL_VERSION;
+  id: number;
+  layout: import("@fengshui/core").HouseLayout;
+}
+
+export interface SimulationWorkerSuccess {
+  protocolVersion: typeof SIMULATION_WORKER_PROTOCOL_VERSION;
+  id: number;
+  ok: true;
+  result: SimulationResult;
+}
+
+export interface SimulationWorkerFailure {
+  protocolVersion: typeof SIMULATION_WORKER_PROTOCOL_VERSION;
+  id: number;
+  ok: false;
+  error: string;
+}
+
+export type SimulationWorkerResponse = SimulationWorkerSuccess | SimulationWorkerFailure;

@@ -196,6 +196,7 @@ export function createTemplateLayout(templateId: TemplateId): HouseLayout {
   const frontDoorDegrees = templateId === "family-three-room" ? 110 : 90;
 
   return {
+    schemaVersion: 2,
     id: `layout-${templateId}`,
     templateId,
     metadata: {

@@ -1,6 +1,6 @@
 import type { BaguaPalace, CompassDirection } from "@fengshui/core";
 
-export type EditorMode = "select" | "draw-wall";
+export type EditorMode = "select" | "draw-wall" | "move" | "door" | "window" | "device" | "measure";
 
 export const directionLabelMap: Record<CompassDirection, string> = {
   N: "北",

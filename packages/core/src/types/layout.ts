@@ -119,6 +119,7 @@ export interface HouseMetadata {
 }
 
 export interface HouseLayout {
+  schemaVersion: 2;
   id: string;
   templateId: TemplateId;
   metadata: HouseMetadata;

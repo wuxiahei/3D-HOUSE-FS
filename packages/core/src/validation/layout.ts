@@ -1,8 +1,10 @@
 import { wallLength } from "../geometry/layout-helpers";
+import { parseHouseLayoutDocument } from "../schema/layout-migrations";
 import type { HouseLayout, ValidationIssue } from "../types/layout";
 
 export function validateLayout(layout: HouseLayout): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
+  const parsed = parseHouseLayoutDocument(layout);
+  const issues: ValidationIssue[] = parsed.success ? [] : parsed.issues;
 
   if (layout.rooms.length === 0) {
     issues.push({

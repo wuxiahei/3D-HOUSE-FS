@@ -5,3 +5,4 @@ export * from "./grid/rasterize";
 export * from "./heat/solveHeat";
 export * from "./summarize";
 export * from "./types";
+export * from "./worker-transfer";

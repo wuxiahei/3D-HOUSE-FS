@@ -1,5 +1,12 @@
 # 3D HOUSE FS
 
+## Productization status
+
+- Runtime layout documents use `schemaVersion: 2`; unversioned/v1 imports are migrated through `@fengshui/core`.
+- Browser simulation is authoritative for the current product. The FastAPI backend is experimental and no longer exposes duplicate heatmap/airflow simulation endpoints.
+- Browser AI mode calls the configured provider directly from the browser, so the browser API key is not sent to the application server. Server AI remains a separate password-protected experimental path.
+- The SketchUp-style editor now has tool modes for Select, Wall, Move, Door, Window, Device, and Measure. Push/Pull, arbitrary solid modeling, CAD/BIM import, multi-floor buildings, and engineering CFD remain out of scope.
+
 3D HOUSE FS 是一个面向户型建模、室内热环境/气流仿真可视化和罗盘风水参考分析的 monorepo 原型项目。项目目标不是做静态展示页，而是提供一个可编辑、可分析、可视化联动的 3D 房屋工作台。
 
 当前版本的热力/气流计算全部在客户端完成，不依赖后端 GPU 或远程 CFD 服务。AI 建模可通过 Next.js API 路由接入 OpenAI 兼容服务；未配置时会自动回落到本地启发式草案。后端保留 FastAPI stub，用于后续接入报告生成或更高精度仿真服务。

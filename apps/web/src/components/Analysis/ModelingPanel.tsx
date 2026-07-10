@@ -262,6 +262,8 @@ export function ModelingPanel({
                 key={templateId}
                 type="button"
                 className={layout.templateId === templateId ? "active" : ""}
+                data-testid={`template-option-${templateId}`}
+                data-template-id={templateId}
                 onClick={() => onSelectTemplate(templateId)}
               >
                 {templateLabels[templateId]}
